@@ -1,0 +1,74 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id               String   @id @default(cuid())
+  name             String
+  url              String
+  defaultOrderQty  Int
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  inventoryRecords InventoryRecord[]
+  orders           Order[]
+
+  @@map("products")
+}
+
+model InventoryRecord {
+  id          String   @id @default(cuid())
+  productId   String
+  stockCount  Int
+  checkDate   DateTime @default(now())
+  checkerName String
+  
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_records")
+}
+
+model Order {
+  id           String    @id @default(cuid())
+  productId    String
+  orderQty     Int
+  orderType    OrderType
+  orderReason  String
+  ordererName  String
+  orderDate    DateTime  @default(now())
+  isExported   Boolean   @default(false)
+  exportDate   DateTime?
+  
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("orders")
+}
+
+model Settings {
+  id                    String @id @default(cuid())
+  consumptionCalcDays   Int    @default(7)
+  reorderThresholdDays  Int    @default(30)
+  reminderDay           Int    @default(5) // 0=Sunday, 1=Monday, etc.
+  reminderTime          String @default("09:00")
+  exportDay             Int    @default(1)
+  exportTime            String @default("10:00")
+  slackWebhookUrl       String @default("")
+  systemName            String @default("触媒研究室 消耗品注文管理システム")
+  adminEmail            String @default("")
+  
+  @@map("settings")
+}
+
+enum OrderType {
+  AUTO
+  MANUAL
+}
