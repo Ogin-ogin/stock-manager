@@ -1,0 +1,26 @@
+{
+  "crons": [],
+  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install",
+  "buildOutputDirectory": ".next",
+  "framework": "nextjs",
+  "devCommand": "pnpm run dev",
+  "outputDirectory": ".next",
+  "ignoreCommand": "",
+  "regions": ["iad1"],
+  "nodeVersion": "18.x",
+  "settings": {
+    "installCommand": "pnpm install",
+    "buildCommand": "pnpm run build",
+    "outputDirectory": ".next",
+    "framework": "nextjs",
+    "nodeVersion": "18.x",
+    "devCommand": "pnpm run dev"
+  },
+  "functions": {
+    "api/**/*": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  }
+}
