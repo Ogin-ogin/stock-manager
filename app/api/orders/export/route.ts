@@ -6,14 +6,20 @@ import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import * as fs from 'fs'
 import * as path from 'path'
+import { encode } from 'iconv-lite'
 
 declare module 'jspdf' {
   interface jsPDF {
-    text(text: string, x: number, y: number): jsPDF
+    text(text: string, x: number, y: number, options?: { align?: string }): jsPDF
     setFontSize(size: number): jsPDF
     rect(x: number, y: number, w: number, h: number, style?: string): jsPDF
     setFillColor(r: number, g: number, b: number): jsPDF
     setTextColor(r: number, g: number, b: number): jsPDF
+    addFileToVFS(filename: string, data: string): void
+    addFont(postScriptName: string, id: string, fontStyle: string, encoding?: string): void
+    setFont(fontName: string, fontStyle?: string, fontWeight?: string): jsPDF
+    split(text: string, maxWidth: number): string[]
+    getTextWidth(text: string): number
   }
 }
 
@@ -117,21 +123,28 @@ export async function POST(request: Request) {
     if (format === 'pdf') {
       try {
         // PDF生成（日本語フォント対応）
-        const doc = new jsPDF();
+        const doc = new jsPDF({
+          orientation: 'portrait',
+          unit: 'mm',
+          format: 'a4'
+        });
         const now = new Date();
         filename = `orders_${now.toISOString().split('T')[0]}.pdf`
         contentType = 'application/pdf'
 
         try {
-          // 日本語フォントを読み込む
+          // IPAexフォントを使用した日本語対応の設定
           const fontPath = path.join(process.cwd(), 'IPAexGothic.ttf');
           const fontBytes = fs.readFileSync(fontPath);
-          doc.addFileToVFS('IPAexGothic.ttf', fontBytes.toString('base64'));
+          doc.addFileToVFS('IPAexGothic.ttf', Buffer.from(fontBytes).toString('base64'));
           doc.addFont('IPAexGothic.ttf', 'IPAexGothic', 'normal');
-          doc.setFont('IPAexGothic');
+          doc.setFont('IPAexGothic', 'normal');
 
+          // 基本設定
+          doc.setLanguage("ja");
+          
           // タイトルを追加
-          doc.setFontSize(16)
+          doc.setFontSize(16);
           doc.text('注文書', 14, 15)
           
           // 出力日時を追加
@@ -154,6 +167,7 @@ export async function POST(request: Request) {
           const rowHeight = 10
           const colWidths = [45, 15, 20, 25, 25, 45]
           const margin = 14
+          const padding = 2
           
           // ヘッダー行の描画
           doc.setFillColor(66, 139, 202)
@@ -163,7 +177,10 @@ export async function POST(request: Request) {
           headers[0].forEach((header, i) => {
             const x = margin + colWidths.slice(0, i).reduce((a, b) => a + b, 0)
             doc.rect(x, startY, colWidths[i], rowHeight, 'F')
-            doc.text(header, x + 1, startY + 7)
+            // テキストを中央寄せにする
+            const textWidth = doc.getTextWidth(header)
+            const textX = x + (colWidths[i] - textWidth) / 2
+            doc.text(header, textX, startY + 7)
           })
           
           // データ行の描画
@@ -173,7 +190,12 @@ export async function POST(request: Request) {
             row.forEach((cell, i) => {
               const x = margin + colWidths.slice(0, i).reduce((a, b) => a + b, 0)
               doc.rect(x, y, colWidths[i], rowHeight)
-              doc.text(String(cell), x + 1, y + 7)
+              
+              // テキストの描画（中央寄せ）
+              const cellText = String(cell)
+              const textWidth = doc.getTextWidth(cellText)
+              const textX = x + (colWidths[i] - textWidth) / 2
+              doc.text(cellText, textX, y + 7)
             })
           })
 
