@@ -5,21 +5,23 @@ export async function GET() {
   try {
     const products = await productsAPI.getAll()
     
-    // フロントエンドが期待する形式に変換
-    const formattedProducts = products
-      .filter((p) => p.isActive)
-      .map((product) => ({
-        id: product.id,
-        name: product.name,
-        url: product.url,
-        defaultQty: Number(product.defaultOrderQty) || 0,  // defaultOrderQty -> defaultQty に変換し、数値化
-        currentStock: product.currentStock || 0,           // currentStock フィールドを追加（デフォルト値0）
-        minStock: product.minStock || undefined,           // 任意フィールド
-        category: product.category || undefined,           // 任意フィールド
-        supplier: product.supplier || undefined,           // 任意フィールド
-        unitPrice: product.unitPrice || undefined,         // 任意フィールド
-        description: product.description || undefined,     // 任意フィールド
-      }))
+    // InventoryRecordsから最新在庫を取得
+    const { inventoryAPI } = await import("@/lib/sheets")
+    const formattedProducts = await Promise.all(
+      products
+        .filter((p) => p.isActive)
+        .map(async (product) => {
+          const records = await inventoryAPI.getByProductId(product.id)
+          const currentStock = records.length > 0 ? Number(records[0].stockCount) : 0
+          return {
+            id: product.id,
+            name: product.name,
+            url: product.url,
+            defaultQty: Number(product.defaultOrderQty) || 0,
+            currentStock,
+          }
+        })
+    )
     
     return NextResponse.json(formattedProducts)
   } catch (error) {

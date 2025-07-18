@@ -44,87 +44,32 @@ export default function ManualOrderPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // テスト用データ（デバッグ用）
-  const testProducts = [
-    {
-      id: "test1",
-      name: "テスト商品1",
-      url: "https://example.com",
-      defaultQty: 10,
-      currentStock: 5,
-      minStock: 3,
-      category: "テストカテゴリ",
-      supplier: "テスト供給元",
-      unitPrice: 100,
-      description: "テスト用の商品です"
-    },
-    {
-      id: "test2",
-      name: "テスト商品2",
-      url: "https://example.com",
-      defaultQty: 20,
-      currentStock: 15,
-      minStock: 5,
-      category: "テストカテゴリ2",
-      supplier: "テスト供給元2",
-      unitPrice: 200,
-      description: "テスト用の商品です2"
-    }
-  ]
 
-  // Fetch products data from API
+  // 本番用: APIから商品データを取得
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         setLoading(true)
         setError(null)
-        
-        console.log("Fetching products from /api/products...")
         const response = await fetch("/api/products")
-        
         if (!response.ok) {
-          console.log("API failed, using test data")
-          setProducts(testProducts)
+          setError("商品データの取得に失敗しました")
           return
         }
-        
         const data = await response.json()
-        console.log("Fetched products data:", data)
         setProducts(data)
       } catch (error) {
-        console.error("Error fetching products:", error)
-        console.log("Using test data due to error")
-        setProducts(testProducts)
+        setError("商品データの取得中にエラーが発生しました")
       } finally {
         setLoading(false)
       }
     }
-
     fetchProducts()
-  }, [toast])
+  }, [])
 
   const selectedProductData = products.find((p) => p.id === selectedProduct)
   
-  // デバッグ用ログ（商品選択時に実行される）
-  useEffect(() => {
-    console.log("=== 商品選択状態変更 ===")
-    console.log("Selected product ID:", selectedProduct)
-    console.log("Selected product data:", selectedProductData)
-    console.log("All products:", products)
-    console.log("Products length:", products.length)
-    
-    if (selectedProduct && !selectedProductData) {
-      console.log("⚠️ 選択された商品IDに対応する商品データが見つかりません")
-    }
-    
-    if (selectedProductData) {
-      console.log("✅ 商品データが正常に見つかりました:", {
-        name: selectedProductData.name,
-        currentStock: selectedProductData.currentStock,
-        defaultQty: selectedProductData.defaultQty
-      })
-    }
-  }, [selectedProduct, selectedProductData, products])
+  // デバッグ用ログ削除（本番では不要）
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -301,28 +246,7 @@ export default function ManualOrderPage() {
                 </Select>
               </div>
 
-              {/* Product Info */}
-              {selectedProduct && (
-                <div className="mb-4 p-4 bg-yellow-100 border border-yellow-400 rounded">
-                  <h3 className="font-bold">デバッグ情報:</h3>
-                  <p>選択された商品ID: {selectedProduct}</p>
-                  <p>商品データ存在: {selectedProductData ? "あり" : "なし"}</p>
-                  <p>全商品数: {products.length}</p>
-                  {selectedProductData && (
-                    <div>
-                      <p>商品名: {selectedProductData.name}</p>
-                      <p>現在在庫: {selectedProductData.currentStock}</p>
-                      <p>推奨発注数: {selectedProductData.defaultQty}</p>
-                      <details className="mt-2">
-                        <summary className="cursor-pointer font-medium">全フィールドを表示</summary>
-                        <pre className="mt-2 text-xs bg-gray-100 p-2 rounded overflow-auto">
-                          {JSON.stringify(selectedProductData, null, 2)}
-                        </pre>
-                      </details>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* デバッグ情報表示を本番では非表示に */}
               
               {selectedProductData && (
                 <Card className="bg-muted/50">

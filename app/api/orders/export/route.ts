@@ -1,15 +1,49 @@
+export const runtime = "nodejs"
 import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
-import 'jspdf-autotable'
 
-// jsPDFの型拡張
-declare module 'jspdf' {
-  interface jsPDF {
-    autoTable: (options: any) => void
+// 環境変数の型定義
+declare global {
+  var process: {
+    env: {
+      SLACK_BOT_TOKEN?: string
+      SLACK_CHANNEL_ID?: string
+    }
   }
+}
+
+// PDF生成用の型定義
+interface AutoTableOptions {
+  head: string[][]
+  body: string[][]
+  startY: number
+  styles?: {
+    font?: string
+    fontSize?: number
+    cellPadding?: number
+  }
+  headStyles?: {
+    fillColor?: number[]
+    textColor?: number[]
+  }
+  columnStyles?: {
+    [key: number]: {
+      cellWidth: number | 'auto'
+    }
+  }
+  margin?: {
+    top?: number
+  }
+}
+
+interface ExtendedJsPDF extends jsPDF {
+  autoTable: (options: AutoTableOptions) => void
+  setFontSize: (size: number) => ExtendedJsPDF
+  text: (text: string, x: number, y: number) => ExtendedJsPDF
+  output: (type: 'arraybuffer') => ArrayBuffer
 }
 
 export async function POST(request: Request) {
@@ -95,46 +129,180 @@ export async function POST(request: Request) {
       商品URL: order.product?.url || "",
       出力状態: order.isExported ? "出力済み" : "未出力",
     }))
-
-    // ファイル生成
-    let fileBuffer: Buffer
+    let fileBuffer: Uint8Array
     let filename: string
     let contentType: string
 
     if (format === 'pdf') {
-      // PDF生成
-      const pdfBuffer = generatePDF(exportData)
-      fileBuffer = Buffer.from(pdfBuffer)
-      filename = `orders_${new Date().toISOString().split('T')[0]}.pdf`
-      contentType = 'application/pdf'
+      try {
+        // PDF生成
+        const doc = new jsPDF()
+        const now = new Date()
+        filename = `orders_${now.toISOString().split('T')[0]}.pdf`
+        contentType = 'application/pdf'
+
+        try {
+          // タイトルを追加（デフォルトフォントを使用）
+          doc.setFontSize(16)
+          doc.text('注文書', 14, 15)
+          
+          // 出力日時を追加
+          doc.setFontSize(10)
+          doc.text(`出力日時: ${now.toLocaleString('ja-JP')}`, 14, 25)
+          
+          // テーブルデータの準備
+          const headers = [['商品名', '数量', '発注タイプ', '発注者', '発注日', '理由']]
+          const data = exportData.map(row => [
+            String(row.商品名 || '').slice(0, 30),
+            String(row.数量 || ''),
+            String(row.発注タイプ || ''),
+            String(row.発注者 || ''),
+            String(row.発注日 || ''),
+            String(row.理由 || '').slice(0, 50)
+          ])
+
+          // データを手動でテーブルとして描画
+          const startY = 30
+          const rowHeight = 10
+          const colWidths = [45, 15, 20, 25, 25, 45]
+          const margin = 14
+          
+          // ヘッダー行の描画
+          doc.setFillColor(66, 139, 202)
+          doc.setTextColor(255, 255, 255)
+          doc.setFontSize(9)
+          
+          headers[0].forEach((header, i) => {
+            const x = margin + colWidths.slice(0, i).reduce((a, b) => a + b, 0)
+            doc.rect(x, startY, colWidths[i], rowHeight, 'F')
+            doc.text(header, x + 1, startY + 7)
+          })
+          
+          // データ行の描画
+          doc.setTextColor(0, 0, 0)
+          data.forEach((row, rowIndex) => {
+            const y = startY + (rowIndex + 1) * rowHeight
+            row.forEach((cell, i) => {
+              const x = margin + colWidths.slice(0, i).reduce((a, b) => a + b, 0)
+              doc.rect(x, y, colWidths[i], rowHeight)
+              doc.text(String(cell), x + 1, y + 7)
+            })
+          })
+
+          // PDFをバッファに変換
+          // PDFバッファの生成
+          const pdfBuffer = new Uint8Array(doc.output('arraybuffer'))
+          
+          try {
+            // Vercel Blobにアップロード
+            const { uploadToVercelBlob } = await import("@/lib/vercel-blob-upload")
+            const blobUrl = await uploadToVercelBlob({
+              fileBuffer: pdfBuffer,
+              filename,
+              contentType
+            })
+
+            // Slack通知の設定を確認
+            const slackToken = process.env.SLACK_BOT_TOKEN
+            const slackChannel = process.env.SLACK_CHANNEL_ID
+
+            if (!slackToken || !slackChannel) {
+              console.warn("Slack設定が不完全です。PDFはSlackに送信されません。")
+              return new NextResponse(pdfBuffer, {
+                headers: {
+                  'Content-Type': contentType,
+                  'Content-Disposition': `attachment; filename="${filename}"`,
+                  'Content-Length': pdfBuffer.length.toString(),
+                }
+              })
+            }
+
+            // Slackにメッセージを送信（新しいfiles.upload APIの代わり）
+            const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${slackToken}`
+              },
+              body: JSON.stringify({
+                channel: slackChannel,
+                text: `注文書PDFを出力しました (${targetOrders.length}件)\n${blobUrl}`,
+                unfurl_links: true
+              })
+            })
+
+            const slackData = await slackRes.json()
+            
+            if (!slackData.ok) {
+              console.error("Slackメッセージ送信エラー:", slackData.error)
+            } else {
+              console.log("Slack通知送信成功:", {
+                channelId: slackChannel,
+                response: slackData
+              })
+            }
+
+            // PDFをダウンロードとして返す
+            return new NextResponse(pdfBuffer, {
+              headers: {
+                'Content-Type': contentType,
+                'Content-Disposition': `attachment; filename="${filename}"`,
+                'Content-Length': pdfBuffer.length.toString(),
+              }
+            })
+          } catch (error) {
+            console.error("ファイル処理エラー:", error)
+            throw new Error(`ファイル処理に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
+          }
+        } catch (pdfError) {
+          console.error('PDF処理エラー:', pdfError)
+          throw new Error(`PDF処理に失敗しました: ${pdfError instanceof Error ? pdfError.message : '不明なエラー'}`)
+        }
+      } catch (error) {
+        return NextResponse.json({ 
+          error: "PDF出力に失敗しました",
+          details: error instanceof Error ? error.message : "不明なエラー"
+        }, { status: 500 })
+      }
     } else {
-      // Excel生成（デフォルト）
-      const excelBuffer = generateExcel(exportData)
-      fileBuffer = excelBuffer
-      filename = `orders_${new Date().toISOString().split('T')[0]}.xlsx`
-      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      try {
+        // Excel生成（デフォルト）
+        const now = new Date()
+        const filename = `orders_${now.toISOString().split('T')[0]}.xlsx`
+        const contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        
+        // xlsxはBuffer型を返すため、Uint8Arrayに変換
+        const excelBuffer = generateExcel(exportData)
+        const fileBuffer = new Uint8Array(excelBuffer)
+
+        // ファイルをレスポンスとして返す
+        return new NextResponse(fileBuffer, {
+          headers: {
+            'Content-Type': contentType,
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Content-Length': fileBuffer.length.toString(),
+          },
+        })
+      } catch (error) {
+        console.error("Excel生成エラー:", error)
+        return NextResponse.json({ 
+          error: "Excel生成に失敗しました",
+          details: error instanceof Error ? error.message : "不明なエラー"
+        }, { status: 500 })
+      }
     }
 
-    // ファイルをレスポンスとして返す
-    return new NextResponse(fileBuffer, {
-      headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': fileBuffer.length.toString(),
-      },
-    })
-
   } catch (error) {
-    console.error("Failed to export orders:", error)
+    console.error("データ処理エラー:", error)
     return NextResponse.json({ 
-      error: "Failed to export orders",
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: "注文データの処理に失敗しました",
+      details: error instanceof Error ? error.message : "不明なエラー"
     }, { status: 500 })
   }
 }
 
 // Excel生成関数
-function generateExcel(data: any[]): Buffer {
+function generateExcel(data: any[]): ArrayBuffer {
   const worksheet = XLSX.utils.json_to_sheet(data)
   
   // 列幅を設定
@@ -169,14 +337,11 @@ function generateExcel(data: any[]): Buffer {
 // PDF生成関数
 function generatePDF(data: any[]): Uint8Array {
   const doc = new jsPDF()
-  
-  // 日本語フォントを設定（必要に応じて）
-  // doc.setFont('NotoSansCJK-Regular')
 
   // タイトル
   doc.setFontSize(16)
   doc.text('注文履歴', 14, 22)
-  
+
   // 出力日時
   doc.setFontSize(10)
   doc.text(`出力日時: ${new Date().toLocaleString('ja-JP')}`, 14, 30)
@@ -197,8 +362,8 @@ function generatePDF(data: any[]): Uint8Array {
     row.出力状態
   ])
 
-  // テーブルを生成
-  doc.autoTable({
+  // テーブルを生成（autoTableを直接呼び出し）
+  autoTable(doc, {
     head: headers,
     body: tableData,
     startY: 40,
