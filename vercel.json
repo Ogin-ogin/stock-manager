@@ -1,21 +1,12 @@
 {
-  "crons": [],
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "regions": ["iad1"],
   "buildCommand": "pnpm install --no-frozen-lockfile && pnpm run build",
   "installCommand": "npm i -g pnpm@9.8.0 && pnpm install --no-frozen-lockfile",
-  "buildOutputDirectory": ".next",
-  "framework": "nextjs",
   "devCommand": "pnpm run dev",
-  "outputDirectory": ".next",
-  "ignoreCommand": "",
-  "regions": ["iad1"],
-  "nodeVersion": "18.x",
   "settings": {
-    "installCommand": "npm i -g pnpm@9.8.0 && pnpm install --no-frozen-lockfile",
-    "buildCommand": "pnpm install --no-frozen-lockfile && pnpm run build",
-    "outputDirectory": ".next",
-    "framework": "nextjs",
-    "nodeVersion": "18.x",
-    "devCommand": "pnpm run dev"
+    "nodeVersion": "18.x"
   },
   "functions": {
     "api/**/*": {
