@@ -3,7 +3,17 @@ import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
 import * as XLSX from 'xlsx'
-import jsPDF from 'jspdf'
+import { jsPDF } from 'jspdf'
+
+declare module 'jspdf' {
+  interface jsPDF {
+    text(text: string, x: number, y: number): jsPDF
+    setFontSize(size: number): jsPDF
+    rect(x: number, y: number, w: number, h: number, style?: string): jsPDF
+    setFillColor(r: number, g: number, b: number): jsPDF
+    setTextColor(r: number, g: number, b: number): jsPDF
+  }
+}
 
 // 環境変数の型定義
 declare global {
@@ -13,37 +23,6 @@ declare global {
       SLACK_CHANNEL_ID?: string
     }
   }
-}
-
-// PDF生成用の型定義
-interface AutoTableOptions {
-  head: string[][]
-  body: string[][]
-  startY: number
-  styles?: {
-    font?: string
-    fontSize?: number
-    cellPadding?: number
-  }
-  headStyles?: {
-    fillColor?: number[]
-    textColor?: number[]
-  }
-  columnStyles?: {
-    [key: number]: {
-      cellWidth: number | 'auto'
-    }
-  }
-  margin?: {
-    top?: number
-  }
-}
-
-interface ExtendedJsPDF extends jsPDF {
-  autoTable: (options: AutoTableOptions) => void
-  setFontSize: (size: number) => ExtendedJsPDF
-  text: (text: string, x: number, y: number) => ExtendedJsPDF
-  output: (type: 'arraybuffer') => ArrayBuffer
 }
 
 export async function POST(request: Request) {
