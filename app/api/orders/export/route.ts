@@ -4,6 +4,8 @@ import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
 import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
+import * as fs from 'fs'
+import * as path from 'path'
 
 declare module 'jspdf' {
   interface jsPDF {
@@ -114,14 +116,21 @@ export async function POST(request: Request) {
 
     if (format === 'pdf') {
       try {
-        // PDF生成
-        const doc = new jsPDF()
-        const now = new Date()
+        // PDF生成（日本語フォント対応）
+        const doc = new jsPDF();
+        const now = new Date();
         filename = `orders_${now.toISOString().split('T')[0]}.pdf`
         contentType = 'application/pdf'
 
         try {
-          // タイトルを追加（デフォルトフォントを使用）
+          // 日本語フォントを読み込む
+          const fontPath = path.join(process.cwd(), 'IPAexGothic.ttf');
+          const fontBytes = fs.readFileSync(fontPath);
+          doc.addFileToVFS('IPAexGothic.ttf', fontBytes.toString('base64'));
+          doc.addFont('IPAexGothic.ttf', 'IPAexGothic', 'normal');
+          doc.setFont('IPAexGothic');
+
+          // タイトルを追加
           doc.setFontSize(16)
           doc.text('注文書', 14, 15)
           
