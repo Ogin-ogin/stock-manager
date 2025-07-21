@@ -12,6 +12,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.16.0",
     "@hookform/resolvers": "^3.9.1",
     "@prisma/client": "latest",
     "@radix-ui/react-accordion": "1.2.2",
@@ -49,6 +50,8 @@
     "cmdk": "1.0.4",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "8.5.1",
+    "google-auth-library": "^10.1.0",
+    "googleapis": "^153.0.0",
     "iconv-lite": "^0.6.3",
     "input-otp": "1.4.1",
     "jsonwebtoken": "latest",

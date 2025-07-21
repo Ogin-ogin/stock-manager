@@ -206,18 +206,18 @@ export async function POST(request: Request) {
             console.log('PDFバッファの生成を開始');
             const buffer = doc.output('arraybuffer');
             console.log('PDFバッファのサイズ:', buffer.byteLength);
-            const pdfBuffer = new Uint8Array(buffer);
-            console.log('Uint8Array変換後のサイズ:', pdfBuffer.length);
+            const pdfBuffer = Buffer.from(buffer);
+            console.log('Buffer変換後のサイズ:', pdfBuffer.length);
 
-            // Vercel Blobにアップロード
-            console.log('Vercel Blobへのアップロードを開始');
-            const { uploadToVercelBlob } = await import("@/lib/vercel-blob-upload")
-            const blobUrl = await uploadToVercelBlob({
-              fileBuffer: pdfBuffer,
+            // Google Driveにアップロード
+            console.log('Google Driveへのアップロードを開始');
+            const { uploadToDrive } = await import("@/lib/google-drive");
+            const driveUrl = await uploadToDrive(
+              pdfBuffer,
               filename,
               contentType
-            })
-            console.log('Vercel Blobへのアップロード完了:', blobUrl);
+            );
+            console.log('Google Driveへのアップロード完了:', driveUrl);
 
             // Slack通知の設定を確認
             const slackToken = process.env.SLACK_BOT_TOKEN
@@ -244,7 +244,7 @@ export async function POST(request: Request) {
               },
               body: JSON.stringify({
                 channel: slackChannel,
-                text: `注文書PDFを出力しました (${targetOrders.length}件)\n${blobUrl}`,
+                text: `注文書PDFを出力しました (${targetOrders.length}件)\nGoogle Drive: ${driveUrl}`,
                 unfurl_links: true
               })
             })
