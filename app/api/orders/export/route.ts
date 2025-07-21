@@ -10,12 +10,11 @@ declare module 'jspdf' {
   interface jsPDF {
     autoTable: (config: any) => void;
     output(type: 'arraybuffer'): ArrayBuffer;
-  interface jsPDF {
-    text(text: string, x: number, y: number, options?: { align?: string }): jsPDF
-    setFontSize(size: number): jsPDF
-    rect(x: number, y: number, w: number, h: number, style?: string): jsPDF
-    setFillColor(r: number, g: number, b: number): jsPDF
-    setTextColor(r: number, g: number, b: number): jsPDF
+    text(text: string, x: number, y: number, options?: { align?: string }): jsPDF;
+    setFontSize(size: number): jsPDF;
+    rect(x: number, y: number, w: number, h: number, style?: string): jsPDF;
+    setFillColor(r: number, g: number, b: number): jsPDF;
+    setTextColor(r: number, g: number, b: number): jsPDF;
     addFileToVFS(filename: string, data: string): void
     addFont(postScriptName: string, id: string, fontStyle: string, encoding?: string): void
     setFont(fontName: string, fontStyle?: string, fontWeight?: string): jsPDF
@@ -26,8 +25,8 @@ declare module 'jspdf' {
 
 // 環境変数の型定義
 declare global {
-  var process: {
-    env: {
+  namespace NodeJS {
+    interface ProcessEnv {
       SLACK_BOT_TOKEN?: string
       SLACK_CHANNEL_ID?: string
     }
@@ -330,7 +329,7 @@ function generateExcel(data: any[]): ArrayBuffer {
 }
 
 // PDF生成関数
-function generatePDF(data: any[]): Uint8Array {
+function generatePDF(data: any[]): ArrayBuffer {
   const doc = new jsPDF()
 
   // タイトル
@@ -347,7 +346,7 @@ function generatePDF(data: any[]): Uint8Array {
   ]
 
   // テーブルのデータ
-  const tableData = data.map(row => [
+  const tableData: string[][] = data.map(row => [
     row.商品名,
     row.数量.toString(),
     row.発注タイプ,
@@ -357,8 +356,8 @@ function generatePDF(data: any[]): Uint8Array {
     row.出力状態
   ])
 
-  // テーブルを生成（autoTableを直接呼び出し）
-  autoTable(doc, {
+  // テーブルを生成
+  (doc as any).autoTable({
     head: headers,
     body: tableData,
     startY: 40,
