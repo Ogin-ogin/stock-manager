@@ -6,12 +6,10 @@ import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import 'jspdf-autotable'
 
-// PDFドキュメントの型を拡張
-interface ExtendedJsPDF extends jsPDF {
-  autoTable: (config: any) => void;
-}
-
 declare module 'jspdf' {
+  interface jsPDF {
+    autoTable: (config: any) => void;
+    output(type: 'arraybuffer'): ArrayBuffer;
   interface jsPDF {
     text(text: string, x: number, y: number, options?: { align?: string }): jsPDF
     setFontSize(size: number): jsPDF
@@ -187,12 +185,8 @@ export async function POST(request: Request) {
           (doc as any).autoTable(tableConfig);
 
           // PDFをバッファに変換
-          const pdfBuffer = new Uint8Array(doc.output('arraybuffer'));
-          })
-
-          // PDFをバッファに変換
-          // PDFバッファの生成
-          const pdfBuffer = new Uint8Array(doc.output('arraybuffer'))
+          const buffer = doc.output('arraybuffer');
+          const pdfBuffer = new Uint8Array(buffer);
           
           try {
             // Vercel Blobにアップロード
