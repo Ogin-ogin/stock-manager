@@ -6,9 +6,24 @@ import * as XLSX from 'xlsx'
 import { jsPDF } from 'jspdf'
 import 'jspdf-autotable'
 
+type AutoTableConfig = {
+  startY: number;
+  head: string[][];
+  body: string[][];
+  styles?: { fontSize: number };
+  headStyles?: {
+    fillColor?: [number, number, number, number];
+    textColor?: [number, number, number, number];
+    fontSize?: number;
+  };
+  bodyStyles?: { fontSize: number };
+  columnStyles?: Record<string, { cellWidth: number }>;
+  margin?: { top: number };
+}
+
 declare module 'jspdf' {
   interface jsPDF {
-    autoTable: (config: any) => void;
+    autoTable: (config: AutoTableConfig) => void;
     output(type: 'arraybuffer'): ArrayBuffer;
     text(text: string, x: number, y: number, options?: { align?: string }): jsPDF;
     setFontSize(size: number): jsPDF;
@@ -122,13 +137,14 @@ export async function POST(request: Request) {
 
     if (format === 'pdf') {
       try {
-        // PDF生成（日本語フォント対応）
+        // PDF生成（基本設定）
         const doc = new jsPDF({
           orientation: 'portrait',
           unit: 'mm',
           format: 'a4',
           putOnlyUsedFonts: true,
-          compress: true
+          compress: true,
+          filters: ['ASCIIHexEncode']  // エンコーディングフィルターを追加
         });
 
         const now = new Date();
@@ -156,32 +172,34 @@ export async function POST(request: Request) {
           ])
 
           // テーブルの設定
-          const tableConfig = {
+          const tableConfig: AutoTableConfig = {
             startY: 30,
             head: headers,
             body: tableData,
+            styles: {
+              fontSize: 9
+            },
             headStyles: {
-              fillColor: [66, 139, 202],
-              textColor: [255, 255, 255],
+              fillColor: [66, 139, 202, 255],
+              textColor: [255, 255, 255, 255],
               fontSize: 9
             },
             bodyStyles: {
               fontSize: 9
             },
             columnStyles: {
-              0: { cellWidth: 45 }, // 商品名
-              1: { cellWidth: 15 }, // 数量
-              2: { cellWidth: 20 }, // 発注タイプ
-              3: { cellWidth: 25 }, // 発注者
-              4: { cellWidth: 25 }, // 発注日
-              5: { cellWidth: 45 }  // 理由
+              "0": { cellWidth: 45 }, // 商品名
+              "1": { cellWidth: 15 }, // 数量
+              "2": { cellWidth: 20 }, // 発注タイプ
+              "3": { cellWidth: 25 }, // 発注者
+              "4": { cellWidth: 25 }, // 発注日
+              "5": { cellWidth: 45 }  // 理由
             },
-            margin: { top: 14 },
-            theme: 'grid'
+            margin: { top: 14 }
           };
 
           // テーブルを描画
-          (doc as any).autoTable(tableConfig);
+          doc.autoTable(tableConfig);
 
           try {
             // PDFをバッファに変換
