@@ -146,7 +146,7 @@ export async function POST(request: Request) {
           
           // テーブルデータの準備
           const headers = [['商品名', '数量', '発注タイプ', '発注者', '発注日', '理由']]
-          const data = exportData.map(row => [
+          const tableData = exportData.map(row => [
             String(row.商品名 || '').slice(0, 30),
             String(row.数量 || ''),
             String(row.発注タイプ || ''),
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
           const tableConfig = {
             startY: 30,
             head: headers,
-            body: data,
+            body: tableData,
             headStyles: {
               fillColor: [66, 139, 202],
               textColor: [255, 255, 255],
@@ -183,18 +183,23 @@ export async function POST(request: Request) {
           // テーブルを描画
           (doc as any).autoTable(tableConfig);
 
-          // PDFをバッファに変換
-          const buffer = doc.output('arraybuffer');
-          const pdfBuffer = new Uint8Array(buffer);
-          
           try {
+            // PDFをバッファに変換
+            console.log('PDFバッファの生成を開始');
+            const buffer = doc.output('arraybuffer');
+            console.log('PDFバッファのサイズ:', buffer.byteLength);
+            const pdfBuffer = new Uint8Array(buffer);
+            console.log('Uint8Array変換後のサイズ:', pdfBuffer.length);
+
             // Vercel Blobにアップロード
+            console.log('Vercel Blobへのアップロードを開始');
             const { uploadToVercelBlob } = await import("@/lib/vercel-blob-upload")
             const blobUrl = await uploadToVercelBlob({
               fileBuffer: pdfBuffer,
               filename,
               contentType
             })
+            console.log('Vercel Blobへのアップロード完了:', blobUrl);
 
             // Slack通知の設定を確認
             const slackToken = process.env.SLACK_BOT_TOKEN
@@ -211,6 +216,7 @@ export async function POST(request: Request) {
               })
             }
 
+            console.log('Slack通知の送信を開始');
             // Slackにメッセージを送信（新しいfiles.upload APIの代わり）
             const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
               method: 'POST',
@@ -224,6 +230,7 @@ export async function POST(request: Request) {
                 unfurl_links: true
               })
             })
+            console.log('Slack API レスポンス受信');
 
             const slackData = await slackRes.json()
             
@@ -246,16 +253,26 @@ export async function POST(request: Request) {
             })
           } catch (error) {
             console.error("ファイル処理エラー:", error)
+            console.error("エラーの詳細:", {
+              error: error instanceof Error ? error.message : '不明なエラー',
+              stack: error instanceof Error ? error.stack : undefined
+            });
             throw new Error(`ファイル処理に失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`)
           }
         } catch (pdfError) {
           console.error('PDF処理エラー:', pdfError)
+          console.error("エラーの詳細:", {
+            error: pdfError instanceof Error ? pdfError.message : '不明なエラー',
+            stack: pdfError instanceof Error ? pdfError.stack : undefined
+          });
           throw new Error(`PDF処理に失敗しました: ${pdfError instanceof Error ? pdfError.message : '不明なエラー'}`)
         }
       } catch (error) {
+        console.error("最終エラーハンドラ:", error);
         return NextResponse.json({ 
           error: "PDF出力に失敗しました",
-          details: error instanceof Error ? error.message : "不明なエラー"
+          details: error instanceof Error ? error.message : "不明なエラー",
+          stack: error instanceof Error ? error.stack : undefined
         }, { status: 500 })
       }
     } else {
