@@ -1,174 +1,266 @@
 "use client"
 
-import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Save, AlertTriangle } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Package, Plus, Minus, Save, ArrowLeft } from "lucide-react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 
-export default function InventoryCheckPage() {
-  const { toast } = useToast()
-  const [checkerName, setCheckerName] = useState("")
-  const [inventoryData, setInventoryData] = useState([
-    {
-      id: 1,
-      name: "プロワイプ（250枚入り）",
-      lastStock: 2,
-      currentStock: "",
-      defaultOrderQty: 5,
-    },
-    {
-      id: 2,
-      name: "キムタオル",
-      lastStock: 8,
-      currentStock: "",
-      defaultOrderQty: 3,
-    },
-    {
-      id: 3,
-      name: "ゴム手袋（SS）",
-      lastStock: 12,
-      currentStock: "",
-      defaultOrderQty: 10,
-    },
-    {
-      id: 4,
-      name: "ゴム手袋（S）",
-      lastStock: 5,
-      currentStock: "",
-      defaultOrderQty: 10,
-    },
-    {
-      id: 5,
-      name: "ゴム手袋（M）",
-      lastStock: 1,
-      currentStock: "",
-      defaultOrderQty: 10,
-    },
-    {
-      id: 6,
-      name: "ゴム手袋（L）",
-      lastStock: 3,
-      currentStock: "",
-      defaultOrderQty: 10,
-    },
-    {
-      id: 7,
-      name: "通常マスク（50枚入り）",
-      lastStock: 12,
-      currentStock: "",
-      defaultOrderQty: 5,
-    },
-  ])
+interface Product {
+  id: string
+  name: string
+  url: string
+  defaultQty: number
+  currentStock: number
+}
 
-  const updateStock = (id: number, value: string) => {
-    setInventoryData((prev) => prev.map((item) => (item.id === id ? { ...item, currentStock: value } : item)))
+interface InventoryItem extends Product {
+  updatedStock: number
+  hasChanged: boolean
+}
+
+interface StockUpdateDialogProps {
+  item: InventoryItem | null
+  isOpen: boolean
+  onClose: () => void
+  onUpdate: (productId: string, newStock: number) => void
+}
+
+function StockUpdateDialog({ item, isOpen, onClose, onUpdate }: StockUpdateDialogProps) {
+  const [stock, setStock] = useState(0)
+
+  useEffect(() => {
+    if (item) {
+      setStock(item.updatedStock)
+    }
+  }, [item])
+
+  const handleIncrement = () => {
+    setStock(prev => prev + 1)
   }
 
-  const handleSave = async () => {
+  const handleDecrement = () => {
+    setStock(prev => Math.max(0, prev - 1))
+  }
+
+  const handleSave = () => {
+    if (item) {
+      onUpdate(item.id, stock)
+      onClose()
+    }
+  }
+
+  if (!item) return null
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-lg">{item.name}</DialogTitle>
+        </DialogHeader>
+        
+        <div className="flex flex-col items-center space-y-6 py-6">
+          <div className="text-center">
+            <Label className="text-sm text-muted-foreground">現在の在庫数</Label>
+            <div className="text-4xl font-bold mt-2">{stock}</div>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-16 w-16 rounded-full"
+              onClick={handleDecrement}
+              disabled={stock <= 0}
+            >
+              <Minus className="h-8 w-8" />
+            </Button>
+            
+            <div className="text-2xl font-semibold min-w-[60px] text-center">
+              {stock}
+            </div>
+            
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-16 w-16 rounded-full"
+              onClick={handleIncrement}
+            >
+              <Plus className="h-8 w-8" />
+            </Button>
+          </div>
+
+          {item.currentStock !== stock && (
+            <div className="text-sm text-muted-foreground">
+              元の在庫: {item.currentStock} → 新しい在庫: {stock}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="flex gap-2">
+          <Button variant="outline" onClick={onClose}>
+            キャンセル
+          </Button>
+          <Button onClick={handleSave}>
+            更新
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export default function InventoryCheckPage() {
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [checkerName, setCheckerName] = useState("")
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+
+  const router = useRouter()
+
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        setLoading(true)
+        const response = await fetch("/api/products")
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        const products: Product[] = await response.json()
+        
+        // Initialize inventory items with current stock as default
+        const items: InventoryItem[] = products.map(product => ({
+          ...product,
+          updatedStock: product.currentStock,
+          hasChanged: false
+        }))
+        
+        setInventoryItems(items)
+      } catch (e: any) {
+        setError(e.message)
+        console.error("Failed to fetch products:", e)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchProducts()
+  }, [])
+
+  const handleStockUpdate = (productId: string, newStock: number) => {
+    setInventoryItems(prevItems =>
+      prevItems.map(item =>
+        item.id === productId
+          ? {
+              ...item,
+              updatedStock: newStock,
+              hasChanged: newStock !== item.currentStock
+            }
+          : item
+      )
+    )
+  }
+
+  const openStockDialog = (item: InventoryItem) => {
+    setSelectedItem(item)
+    setDialogOpen(true)
+  }
+
+  const handleSaveInventory = async () => {
     if (!checkerName.trim()) {
-      toast({
-        title: "エラー",
-        description: "点検者名を入力してください。",
-        variant: "destructive",
-      })
+      alert("点検者名を入力してください")
       return
     }
-
-    const incompleteItems = inventoryData.filter((item) => !item.currentStock.trim())
-    if (incompleteItems.length > 0) {
-      toast({
-        title: "エラー",
-        description: "すべての商品の在庫数を入力してください。",
-        variant: "destructive",
-      })
-      return
-    }
-
-    toast({
-      title: "保存中",
-      description: "在庫点検データを保存しています...",
-    })
 
     try {
+      setSaving(true)
+      
+      const inventoryData = inventoryItems.map(item => ({
+        productId: item.id,
+        stockCount: item.updatedStock
+      }))
+
       const response = await fetch("/api/inventory/check", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          checkerName,
-          inventoryData: inventoryData.map((item) => ({
-            productId: item.id,
-            stockCount: Number.parseInt(item.currentStock),
-          })),
-        }),
+          checkerName: checkerName.trim(),
+          inventoryData
+        })
       })
 
       if (!response.ok) {
-        throw new Error("Failed to save inventory data")
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
 
       const result = await response.json()
-
-      toast({
-        title: "保存完了",
-        description: "在庫点検データを保存しました。自動発注判定を実行中...",
-      })
-
+      
+      // Show success message with auto-order info
+      let message = "在庫点検が正常に保存されました。"
       if (result.autoOrdersCreated > 0) {
-        toast({
-          title: "自動発注実行",
-          description: `${result.autoOrdersCreated}件の商品で自動発注を実行しました。`,
-        })
+        message += `\n${result.autoOrdersCreated}件の自動発注を作成しました。`
       }
-    } catch (error) {
-      console.error("Error saving inventory data:", error)
-      toast({
-        title: "エラー",
-        description: "在庫点検データの保存に失敗しました。",
-        variant: "destructive",
-      })
+      
+      alert(message)
+      
+      // Redirect back to inventory page
+      router.push("/inventory")
+      
+    } catch (e: any) {
+      setError(e.message)
+      console.error("Failed to save inventory:", e)
+      alert("在庫点検の保存に失敗しました: " + e.message)
+    } finally {
+      setSaving(false)
     }
   }
 
-  const getStockStatus = (current: string, last: number) => {
-    if (!current) return null
-    const currentNum = Number.parseInt(current)
-    if (currentNum <= 1) return "critical"
-    if (currentNum <= 3) return "low"
-    return "normal"
+  const getStockStatusColor = (item: InventoryItem) => {
+    if (item.updatedStock <= 2) return "destructive"
+    if (item.updatedStock <= 5) return "secondary"
+    return "default"
   }
 
-  const getStatusBadge = (status: string | null) => {
-    if (!status) return null
-    switch (status) {
-      case "critical":
-        return <Badge variant="destructive">要注文</Badge>
-      case "low":
-        return <Badge variant="secondary">少ない</Badge>
-      default:
-        return <Badge variant="default">正常</Badge>
-    }
+  const getStockStatusText = (item: InventoryItem) => {
+    if (item.updatedStock <= 2) return "要注文"
+    if (item.updatedStock <= 5) return "少ない"
+    return "正常"
+  }
+
+  const changedItemsCount = inventoryItems.filter(item => item.hasChanged).length
+
+  if (loading) {
+    return <div className="p-6 text-center text-lg font-medium">商品データを読み込み中...</div>
+  }
+
+  if (error) {
+    return <div className="p-6 text-center text-lg text-destructive">エラー: {error}</div>
   }
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">在庫点検</h1>
-          <p className="text-muted-foreground">現在の在庫数を入力してください</p>
-        </div>
-        <div className="text-sm text-muted-foreground">
-          {new Date().toLocaleDateString("ja-JP", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-            weekday: "long",
-          })}
+        <div className="flex items-center space-x-4">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/inventory">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              戻る
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">在庫点検</h1>
+            <p className="text-muted-foreground">各商品の在庫数を確認・更新してください</p>
+          </div>
         </div>
       </div>
 
@@ -177,69 +269,99 @@ export default function InventoryCheckPage() {
         <CardHeader>
           <CardTitle className="text-lg">点検者情報</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="max-w-md">
-            <Label htmlFor="checker-name">点検者名</Label>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="checker-name">点検者名 *</Label>
             <Input
               id="checker-name"
-              placeholder="山田太郎"
+              placeholder="点検者の名前を入力"
               value={checkerName}
               onChange={(e) => setCheckerName(e.target.value)}
-              className="mt-1"
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Inventory Check Form */}
+      {/* Summary */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              総商品数: {inventoryItems.length}件 | 変更済み: {changedItemsCount}件
+            </div>
+            <Button 
+              onClick={handleSaveInventory}
+              disabled={saving || !checkerName.trim()}
+              className="ml-4"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {saving ? "保存中..." : "点検結果を保存"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Product Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {inventoryData.map((item) => {
-          const status = getStockStatus(item.currentStock, item.lastStock)
-          return (
-            <Card key={item.id}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <CardTitle className="text-base leading-tight">{item.name}</CardTitle>
-                  {getStatusBadge(status)}
-                </div>
-                <CardDescription>前回在庫: {item.lastStock}個</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor={`stock-${item.id}`}>現在在庫数</Label>
-                  <Input
-                    id={`stock-${item.id}`}
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={item.currentStock}
-                    onChange={(e) => updateStock(item.id, e.target.value)}
-                    className="mt-1 text-lg font-medium"
-                  />
-                </div>
-
-                {status === "critical" && (
-                  <div className="flex items-start gap-2 p-2 bg-destructive/10 rounded-lg">
-                    <AlertTriangle className="w-4 h-4 text-destructive mt-0.5" />
-                    <div className="text-sm">
-                      <p className="font-medium text-destructive">在庫不足</p>
-                      <p className="text-muted-foreground">自動発注対象（推奨: {item.defaultOrderQty}個）</p>
+        {inventoryItems.map((item) => (
+          <Card 
+            key={item.id} 
+            className={`cursor-pointer transition-colors hover:bg-muted/50 ${
+              item.hasChanged ? "ring-2 ring-blue-500" : ""
+            }`}
+            onClick={() => openStockDialog(item)}
+          >
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between">
+                <CardTitle className="text-base leading-tight">{item.name}</CardTitle>
+                <Badge variant={getStockStatusColor(item) as any}>
+                  {getStockStatusText(item)}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Current Stock Display */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">現在在庫</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl font-bold">{item.updatedStock}</span>
+                  {item.hasChanged && (
+                    <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                      変更済み
                     </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )
-        })}
+                  )}
+                </div>
+              </div>
+
+              {/* Original vs Updated Stock */}
+              {item.hasChanged && (
+                <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+                  元の在庫: {item.currentStock} → {item.updatedStock}
+                </div>
+              )}
+
+              {/* Default Order Quantity */}
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">標準発注数</span>
+                <span>{item.defaultQty}</span>
+              </div>
+
+              {/* Action Hint */}
+              <div className="text-center pt-2">
+                <span className="text-xs text-muted-foreground">タップして在庫数を更新</span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Save Button */}
-      <div className="flex justify-center pt-6">
-        <Button onClick={handleSave} size="lg" className="min-w-[200px]">
-          <Save className="w-4 h-4 mr-2" />
-          在庫点検を保存
-        </Button>
-      </div>
+      {/* Stock Update Dialog */}
+      <StockUpdateDialog
+        item={selectedItem}
+        isOpen={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onUpdate={handleStockUpdate}
+      />
     </div>
   )
 }
