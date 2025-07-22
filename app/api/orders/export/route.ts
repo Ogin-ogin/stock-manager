@@ -2,6 +2,7 @@ export const runtime = "nodejs"
 import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
+import { uploadToVercelBlob } from "@/lib/vercel-blob-upload"
 import * as XLSX from 'xlsx'
 
 declare global {
@@ -9,9 +10,7 @@ declare global {
     interface ProcessEnv {
       SLACK_BOT_TOKEN?: string
       SLACK_CHANNEL_ID?: string
-      GOOGLE_CLIENT_EMAIL?: string
-      GOOGLE_PRIVATE_KEY?: string
-      GOOGLE_DRIVE_FOLDER_ID?: string
+      BLOB_READ_WRITE_TOKEN?: string
     }
   }
 }
@@ -103,32 +102,30 @@ export async function POST(request: Request) {
     const excelBuffer = generateExcel(exportData)
     const fileBuffer = new Uint8Array(excelBuffer)
 
-    // Google Drive アップロードとSlack通知
-    let driveUrl: string | null = null
-    let slackFileUploaded = false
+    // Vercel Blob アップロードとSlack通知
+    let blobUrl: string | null = null
     
     try {
-      // Google Drive アップロードを試行
-      console.log('Google Drive処理を開始')
+      // Vercel Blob アップロードを試行
+      console.log('Vercel Blob処理を開始')
       console.log('環境変数チェック:', {
-        hasClientEmail: !!process.env.GOOGLE_CLIENT_EMAIL,
-        hasPrivateKey: !!process.env.GOOGLE_PRIVATE_KEY,
-        hasFolderId: !!process.env.GOOGLE_DRIVE_FOLDER_ID
+        hasBlobToken: !!process.env.BLOB_READ_WRITE_TOKEN
       })
       
-      const { uploadToDrive } = await import("@/lib/google-drive")
-      console.log('uploadToDrive関数をインポートしました')
-      
-      driveUrl = await uploadToDrive(fileBuffer, filename, contentType)
-      console.log('Google Driveへのアップロード完了:', driveUrl)
-    } catch (driveError) {
-      console.warn('Google Drive処理エラー（続行します）:', {
-        error: driveError instanceof Error ? driveError.message : 'Unknown error',
-        stack: driveError instanceof Error ? driveError.stack : undefined
+      blobUrl = await uploadToVercelBlob({
+        fileBuffer,
+        filename,
+        contentType
+      })
+      console.log('Vercel Blobへのアップロード完了:', blobUrl)
+    } catch (blobError) {
+      console.warn('Vercel Blob処理エラー（続行します）:', {
+        error: blobError instanceof Error ? blobError.message : 'Unknown error',
+        stack: blobError instanceof Error ? blobError.stack : undefined
       })
     }
 
-    // Slack通知（ファイル送信またはGoogle Driveリンク）
+    // Slack通知（ファイル送信またはVercel Blobリンク）
     const slackToken = process.env.SLACK_BOT_TOKEN
     const slackChannel = process.env.SLACK_CHANNEL_ID
 
@@ -136,9 +133,9 @@ export async function POST(request: Request) {
       console.log('Slack通知の送信を開始')
       
       try {
-        if (driveUrl) {
-          // Google Driveリンクをシェア
-          const slackMessage = `注文書Excelファイルを出力しました (${targetOrders.length}件)\nGoogle Drive: ${driveUrl}`
+        if (blobUrl) {
+          // Vercel Blobリンクをシェア
+          const slackMessage = `注文書Excelファイルを出力しました (${targetOrders.length}件)\nダウンロード: ${blobUrl}`
           
           const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
             method: 'POST',
@@ -161,7 +158,7 @@ export async function POST(request: Request) {
             console.log("Slack通知送信成功")
           }
         } else {
-          // 直接ファイルをSlackにアップロード
+          // 直接ファイルをSlackにアップロード（フォールバック）
           console.log('Slackへの直接ファイルアップロードを試行')
           
           const formData = new FormData()
@@ -182,7 +179,6 @@ export async function POST(request: Request) {
           
           if (uploadData.ok) {
             console.log('Slackファイルアップロード成功')
-            slackFileUploaded = true
           } else {
             console.error('Slackファイルアップロードエラー:', uploadData.error)
             
