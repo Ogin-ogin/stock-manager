@@ -3,8 +3,10 @@ import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
 import * as XLSX from 'xlsx'
-import { jsPDF } from 'jspdf'
-import 'jspdf-autotable'
+
+// Vercelサーバーレス環境対応: requireで読み込む
+const { jsPDF } = require('jspdf');
+require('jspdf-autotable');
 
 type AutoTableConfig = {
   startY: number;
