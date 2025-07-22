@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import { JWT } from 'google-auth-library';
+import { Readable } from 'stream';  // ← 追加
 
 // Google Drive APIの認証情報
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
@@ -8,6 +9,14 @@ interface GoogleDriveConfig {
   clientEmail: string;
   privateKey: string;
   folderId: string;
+}
+
+// ✅ Buffer を Readable Stream に変換するヘルパー
+function bufferToStream(buffer: Buffer): Readable {
+  const stream = new Readable();
+  stream.push(buffer);
+  stream.push(null);
+  return stream;
 }
 
 export async function uploadToDrive(
@@ -41,23 +50,23 @@ export async function uploadToDrive(
       parents: [config.folderId]
     };
 
-    // アップロードの実行
+    // ✅ Buffer を Readable Stream に変換してアップロード
     const response = await drive.files.create({
       requestBody: fileMetadata,
       media: {
-        mimeType: mimeType,
-        body: Buffer.from(fileBuffer)
+        mimeType,
+        body: bufferToStream(fileBuffer)  // ← ここを修正
       },
       fields: 'id, webViewLink'
     });
 
-    if (!response.data.webViewLink) {
+    if (!response.data.webViewLink || !response.data.id) {
       throw new Error('Failed to get file link');
     }
 
-    // ファイルの権限を設定（リンクを知っている人なら誰でも閲覧可能）
+    // ✅ 公開リンクの権限を設定（リンクを知っている人なら誰でも閲覧可能）
     await drive.permissions.create({
-      fileId: response.data.id!,
+      fileId: response.data.id,
       requestBody: {
         role: 'reader',
         type: 'anyone'
@@ -67,6 +76,8 @@ export async function uploadToDrive(
     return response.data.webViewLink;
   } catch (error) {
     console.error('Google Drive upload error:', error);
-    throw new Error(`Failed to upload to Google Drive: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw new Error(`Failed to upload to Google Drive: ${
+      error instanceof Error ? error.message : 'Unknown error'
+    }`);
   }
 }
