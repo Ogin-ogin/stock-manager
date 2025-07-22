@@ -277,7 +277,11 @@ export default function InventoryCheckPage() {
               placeholder="点検者の名前を入力"
               value={checkerName}
               onChange={(e) => setCheckerName(e.target.value)}
+              className={!checkerName.trim() ? "border-red-200 focus:border-red-500" : ""}
             />
+            {!checkerName.trim() && (
+              <p className="text-sm text-red-600">点検者名の入力が必要です</p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -288,11 +292,12 @@ export default function InventoryCheckPage() {
           <div className="flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
               総商品数: {inventoryItems.length}件 | 変更済み: {changedItemsCount}件
+              {!checkerName.trim() && <span className="text-red-500 ml-2">（点検者名を入力してください）</span>}
             </div>
             <Button 
               onClick={handleSaveInventory}
               disabled={saving || !checkerName.trim()}
-              className="ml-4"
+              variant={!checkerName.trim() ? "secondary" : "default"}
             >
               <Save className="w-4 h-4 mr-2" />
               {saving ? "保存中..." : "点検結果を保存"}
