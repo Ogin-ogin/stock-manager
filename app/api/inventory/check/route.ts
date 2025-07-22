@@ -11,16 +11,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid request data" }, { status: 400 })
     }
 
-    // 在庫記録を保存
-    const records = await Promise.all(
-      inventoryData.map((item: any) =>
-        inventoryAPI.create({
-          productId: item.productId,
-          stockCount: Number.parseInt(item.stockCount),
-          checkerName,
-        }),
-      ),
-    )
+    console.log("Received inventory data:", inventoryData) // デバッグログ追加
+
+    // 在庫記録を保存（修正版）
+    const records = []
+    for (const item of inventoryData) {
+      console.log(`Processing item:`, item) // デバッグログ追加
+      
+      const record = await inventoryAPI.create({
+        productId: item.productId,
+        stockCount: item.stockCount, // Number.parseInt()を削除（既に数値）
+        checkerName,
+      })
+      
+      console.log(`Created record for productId ${item.productId}:`, record) // デバッグログ追加
+      records.push(record)
+    }
 
     // 自動発注判定
     const settings = await settingsAPI.get()
@@ -34,9 +40,14 @@ export async function POST(request: NextRequest) {
     for (const item of inventoryData) {
       const product = products.find((p) => p.id === item.productId)
 
-      if (!product) continue
+      if (!product) {
+        console.warn(`Product not found for productId: ${item.productId}`) // デバッグログ追加
+        continue
+      }
 
-      const stockCount = Number.parseInt(item.stockCount)
+      const stockCount = item.stockCount // 既に数値なのでそのまま使用
+
+      console.log(`Checking stock for ${product.name}: ${stockCount}`) // デバッグログ追加
 
       // 簡単な自動発注ロジック（在庫が2個以下の場合）
       if (stockCount <= 2) {
@@ -65,6 +76,8 @@ export async function POST(request: NextRequest) {
       const message = createInventoryAlertMessage(lowStockItems)
       await sendSlackNotification(message)
     }
+
+    console.log(`Successfully processed ${records.length} records and created ${autoOrders.length} auto orders`) // デバッグログ追加
 
     return NextResponse.json({
       success: true,
