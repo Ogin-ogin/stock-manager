@@ -3,6 +3,8 @@ import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
 import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 // Vercelサーバーレス環境対応: requireで読み込む
 const { jsPDF } = require('jspdf');
@@ -202,7 +204,7 @@ export async function POST(request: Request) {
           };
 
           // テーブルを描画
-          doc.autoTable(tableConfig);
+          autoTable(doc, tableConfig);
 
           try {
             // PDFをバッファに変換
@@ -412,30 +414,27 @@ function generatePDF(data: any[]): ArrayBuffer {
   ])
 
   // テーブルを生成
-  (doc as any).autoTable({
+  autoTable(doc, {
     head: headers,
     body: tableData,
     startY: 40,
-    styles: {
-      fontSize: 7,
-      cellPadding: 2,
-    },
+    styles: { fontSize: 7, cellPadding: 2 },
     headStyles: {
       fillColor: [230, 230, 250],
       textColor: [0, 0, 0],
       fontStyle: 'bold',
     },
     columnStyles: {
-      0: { cellWidth: 35 }, // 商品名
-      1: { cellWidth: 15 }, // 数量
-      2: { cellWidth: 20 }, // 発注タイプ
-      3: { cellWidth: 20 }, // 発注者
-      4: { cellWidth: 20 }, // 発注日
-      5: { cellWidth: 40 }, // 理由
-      6: { cellWidth: 20 }, // 出力状態
+      0: { cellWidth: 35 },
+      1: { cellWidth: 15 },
+      2: { cellWidth: 20 },
+      3: { cellWidth: 20 },
+      4: { cellWidth: 20 },
+      5: { cellWidth: 40 },
+      6: { cellWidth: 20 },
     },
     margin: { top: 40 },
-  })
+  });
 
-  return doc.output('arraybuffer')
+  return doc.output('arraybuffer');
 }
