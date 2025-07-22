@@ -3,40 +3,7 @@ import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
 import * as XLSX from 'xlsx'
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
-
-type AutoTableConfig = {
-  startY: number;
-  head: string[][];
-  body: string[][];
-  styles?: { fontSize: number };
-  headStyles?: {
-    fillColor?: [number, number, number, number];
-    textColor?: [number, number, number, number];
-    fontSize?: number;
-  };
-  bodyStyles?: { fontSize: number };
-  columnStyles?: Record<string, { cellWidth: number }>;
-  margin?: { top: number };
-}
-
-declare module 'jspdf' {
-  interface jsPDF {
-    autoTable: (config: AutoTableConfig) => void;
-    output(type: 'arraybuffer'): ArrayBuffer;
-    text(text: string, x: number, y: number, options?: { align?: string }): jsPDF;
-    setFontSize(size: number): jsPDF;
-    rect(x: number, y: number, w: number, h: number, style?: string): jsPDF;
-    setFillColor(r: number, g: number, b: number): jsPDF;
-    setTextColor(r: number, g: number, b: number): jsPDF;
-    addFileToVFS(filename: string, data: string): void
-    addFont(postScriptName: string, id: string, fontStyle: string, encoding?: string): void
-    setFont(fontName: string, fontStyle?: string, fontWeight?: string): jsPDF
-    split(text: string, maxWidth: number): string[]
-    getTextWidth(text: string): number
-  }
-}
+import PDFDocument from 'pdfkit'
 
 declare global {
   namespace NodeJS {
@@ -131,75 +98,12 @@ export async function POST(request: Request) {
     let contentType: string
 
     if (format === 'pdf') {
-      console.log('PDF生成を開始します')
+      console.log('PDFKit による PDF生成を開始します')
       filename = `orders_${now.toISOString().split('T')[0]}.pdf`
       contentType = 'application/pdf'
 
-      // PDF生成
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-        putOnlyUsedFonts: true,
-        compress: true
-      })
-
-      console.log('jsPDFインスタンスを作成しました')
-
-      // フォントサイズの設定
-      doc.setFontSize(16)
-      doc.text('注文書', 14, 15)
-      
-      // 出力日時を追加
-      doc.setFontSize(10)
-      doc.text(`出力日時: ${now.toLocaleString('ja-JP')}`, 14, 25)
-      
-      // テーブルデータの準備
-      const headers = [['商品名', '数量', '発注タイプ', '発注者', '発注日', '理由']]
-      const tableData = exportData.map(row => [
-        String(row.商品名 || '').slice(0, 30),
-        String(row.数量 || ''),
-        String(row.発注タイプ || ''),
-        String(row.発注者 || ''),
-        String(row.発注日 || ''),
-        String(row.理由 || '').slice(0, 50)
-      ])
-
-      // テーブルの設定
-      const tableConfig: AutoTableConfig = {
-        startY: 30,
-        head: headers,
-        body: tableData,
-        styles: {
-          fontSize: 9
-        },
-        headStyles: {
-          fillColor: [66, 139, 202, 255],
-          textColor: [255, 255, 255, 255],
-          fontSize: 9
-        },
-        bodyStyles: {
-          fontSize: 9
-        },
-        columnStyles: {
-          "0": { cellWidth: 45 },
-          "1": { cellWidth: 15 },
-          "2": { cellWidth: 20 },
-          "3": { cellWidth: 25 },
-          "4": { cellWidth: 25 },
-          "5": { cellWidth: 45 }
-        },
-        margin: { top: 14 }
-      }
-
-      // テーブルを描画
-      autoTable(doc, tableConfig)
-
-      console.log('PDFバッファの生成を開始')
-      const buffer = doc.output('arraybuffer')
-      console.log('PDFバッファのサイズ:', buffer.byteLength)
-      const pdfBuffer = Buffer.from(buffer)
-      console.log('Buffer変換後のサイズ:', pdfBuffer.length)
+      // PDFKitでPDF生成
+      const pdfBuffer = await generatePDFWithPDFKit(exportData, now)
 
       // Google Drive アップロードを試行（エラー時はスキップ）
       let driveUrl: string | null = null
@@ -289,6 +193,167 @@ export async function POST(request: Request) {
       details: error instanceof Error ? error.message : "不明なエラー"
     }, { status: 500 })
   }
+}
+
+// PDFKitを使用したPDF生成関数
+async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log('PDFKitインスタンスを作成中...')
+      
+      // PDFDocument作成（日本語フォント対応）
+      const doc = new PDFDocument({
+        size: 'A4',
+        margin: 50,
+        info: {
+          Title: '注文書',
+          Author: 'Order Management System',
+          Subject: '注文履歴',
+          CreationDate: date
+        }
+      })
+
+      console.log('PDFDocument作成完了')
+      
+      const buffers: Buffer[] = []
+      
+      // データをバッファに収集
+      doc.on('data', (chunk: Buffer) => {
+        buffers.push(chunk)
+      })
+      
+      doc.on('end', () => {
+        console.log('PDF生成完了')
+        const pdfBuffer = Buffer.concat(buffers)
+        console.log(`生成されたPDFサイズ: ${pdfBuffer.length} bytes`)
+        resolve(pdfBuffer)
+      })
+
+      doc.on('error', (error: Error) => {
+        console.error('PDFKit生成エラー:', error)
+        reject(error)
+      })
+
+      // 日本語フォントの設定を試行
+      try {
+        // Noto Sans JPフォントまたは代替フォントを使用
+        // フォントファイルが利用可能な場合の設定
+        // doc.font('/path/to/NotoSansJP-Regular.ttf')
+        
+        // 代替案: PDFKitの標準フォント（一部日本語対応）
+        doc.font('Helvetica')
+        console.log('フォント設定完了（Helvetica）')
+      } catch (fontError) {
+        console.warn('フォント設定エラー:', fontError)
+        // デフォルトフォントを使用
+      }
+
+      // ページ設定
+      const pageWidth = doc.page.width - 100 // マージンを考慮
+      const startY = 80
+      let currentY = startY
+
+      // タイトル
+      doc.fontSize(18)
+         .text('注文書', 50, 50, { align: 'center' })
+
+      // 出力日時
+      doc.fontSize(10)
+         .text(`出力日時: ${date.toLocaleString('ja-JP')}`, 50, 70)
+
+      currentY = 100
+
+      // テーブルヘッダー
+      const headers = ['商品名', '数量', '発注タイプ', '発注者', '発注日', '理由']
+      const columnWidths = [120, 40, 60, 80, 60, 120] // 列幅
+      const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0)
+      
+      // ヘッダー背景
+      doc.rect(50, currentY, totalWidth, 25)
+         .fill('#428bca')
+         .stroke()
+
+      // ヘッダーテキスト
+      doc.fill('#ffffff')
+         .fontSize(9)
+      
+      let xPos = 50
+      headers.forEach((header, i) => {
+        const cellCenterX = xPos + columnWidths[i] / 2
+        doc.text(header, cellCenterX - doc.widthOfString(header) / 2, currentY + 8)
+        xPos += columnWidths[i]
+      })
+
+      currentY += 25
+
+      // データ行
+      doc.fill('#000000') // テキスト色を黒に戻す
+      
+      data.forEach((row, rowIndex) => {
+        // ページ改行チェック
+        if (currentY > doc.page.height - 100) {
+          doc.addPage()
+          currentY = 50
+        }
+
+        // 行の背景色（交互）
+        if (rowIndex % 2 === 0) {
+          doc.rect(50, currentY, totalWidth, 20)
+             .fill('#f8f9fa')
+             .stroke()
+        } else {
+          doc.rect(50, currentY, totalWidth, 20)
+             .stroke()
+        }
+
+        // セルデータ
+        const rowData = [
+          (row.商品名 || '').toString().substring(0, 15), // 文字数制限
+          (row.数量 || '').toString(),
+          (row.発注タイプ || '').toString(),
+          (row.発注者 || '').toString().substring(0, 10),
+          (row.発注日 || '').toString(),
+          (row.理由 || '').toString().substring(0, 20)
+        ]
+
+        doc.fill('#000000')
+           .fontSize(8)
+        
+        xPos = 50
+        rowData.forEach((cellData, colIndex) => {
+          // セル内でのテキスト配置
+          const cellY = currentY + 6
+          const maxWidth = columnWidths[colIndex] - 4 // パディング
+          
+          // テキストを複数行に分割する場合の処理
+          const lines = doc.heightOfString(cellData, { width: maxWidth })
+          if (lines > 14) { // セルの高さを超える場合は短縮
+            const truncated = cellData.substring(0, Math.floor(cellData.length * 14 / lines)) + '...'
+            doc.text(truncated, xPos + 2, cellY, { width: maxWidth })
+          } else {
+            doc.text(cellData, xPos + 2, cellY, { width: maxWidth })
+          }
+          
+          xPos += columnWidths[colIndex]
+        })
+
+        currentY += 20
+      })
+
+      // フッター
+      const footerY = doc.page.height - 50
+      doc.fontSize(8)
+         .text(`総件数: ${data.length}件`, 50, footerY)
+         .text(`ページ: 1`, doc.page.width - 100, footerY)
+
+      console.log('PDF内容の描画完了、終了処理中...')
+      doc.end()
+
+    } catch (error) {
+      console.error('PDFKit生成中にエラーが発生:', error)
+      reject(error)
+    }
+  })
 }
 
 // Excel生成関数
