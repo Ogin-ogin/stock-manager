@@ -137,15 +137,16 @@ export async function POST(request: Request) {
 
     if (format === 'pdf') {
       try {
+        console.log('PDF生成を開始します');
         // PDF生成（基本設定）
         const doc = new jsPDF({
           orientation: 'portrait',
           unit: 'mm',
           format: 'a4',
           putOnlyUsedFonts: true,
-          compress: true,
-          filters: ['ASCIIHexEncode']  // エンコーディングフィルターを追加
+          compress: true
         });
+        console.log('jsPDFインスタンスを作成しました');
 
         const now = new Date();
         filename = `orders_${now.toISOString().split('T')[0]}.pdf`
@@ -210,14 +211,31 @@ export async function POST(request: Request) {
             console.log('Buffer変換後のサイズ:', pdfBuffer.length);
 
             // Google Driveにアップロード
-            console.log('Google Driveへのアップロードを開始');
-            const { uploadToDrive } = await import("@/lib/google-drive");
-            const driveUrl = await uploadToDrive(
-              pdfBuffer,
-              filename,
-              contentType
-            );
-            console.log('Google Driveへのアップロード完了:', driveUrl);
+            let driveUrl: string;
+            try {
+              console.log('Google Drive処理を開始');
+              console.log('環境変数チェック:', {
+                hasClientEmail: !!process.env.GOOGLE_CLIENT_EMAIL,
+                hasPrivateKey: !!process.env.GOOGLE_PRIVATE_KEY,
+                hasFolderId: !!process.env.GOOGLE_DRIVE_FOLDER_ID
+              });
+              
+              const { uploadToDrive } = await import("@/lib/google-drive");
+              console.log('uploadToDrive関数をインポートしました');
+              
+              driveUrl = await uploadToDrive(
+                pdfBuffer,
+                filename,
+                contentType
+              );
+              console.log('Google Driveへのアップロード完了:', driveUrl);
+            } catch (driveError) {
+              console.error('Google Drive処理エラー:', {
+                error: driveError instanceof Error ? driveError.message : 'Unknown error',
+                stack: driveError instanceof Error ? driveError.stack : undefined
+              });
+              throw driveError;
+            }
 
             // Slack通知の設定を確認
             const slackToken = process.env.SLACK_BOT_TOKEN
