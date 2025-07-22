@@ -2,7 +2,6 @@ export const runtime = "nodejs"
 import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
-import { addJapaneseFont, setJapaneseFont, splitText, FONT_PRESETS, setFontPreset } from "@/lib/jp-fonts"
 import * as XLSX from 'xlsx'
 
 declare global {
@@ -10,6 +9,9 @@ declare global {
     interface ProcessEnv {
       SLACK_BOT_TOKEN?: string
       SLACK_CHANNEL_ID?: string
+      GOOGLE_CLIENT_EMAIL?: string
+      GOOGLE_PRIVATE_KEY?: string
+      GOOGLE_DRIVE_FOLDER_ID?: string
     }
   }
 }
@@ -18,7 +20,7 @@ export async function POST(request: Request) {
   try {
     // リクエストボディを解析
     const body = await request.json().catch(() => ({}))
-    const { format = 'xlsx', includeExported = false, startDate } = body
+    const { includeExported = false, startDate } = body
 
     // 注文を取得
     const orders = await ordersAPI.getAll()
@@ -94,97 +96,127 @@ export async function POST(request: Request) {
     }))
 
     const now = new Date()
-    let filename: string
-    let contentType: string
+    const filename = `orders_${now.toISOString().split('T')[0]}.xlsx`
+    const contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    
+    // Excel生成
+    const excelBuffer = generateExcel(exportData)
+    const fileBuffer = new Uint8Array(excelBuffer)
 
-    if (format === 'pdf') {
-      console.log('jsPDF による PDF生成を開始します')
-      filename = `orders_${now.toISOString().split('T')[0]}.pdf`
-      contentType = 'application/pdf'
-
-      // jsPDFでPDF生成
-      const pdfBuffer = await generatePDFWithJsPDF(exportData, now)
-
-      // Google Drive アップロードを試行（エラー時はスキップ）
-      let driveUrl: string | null = null
-      try {
-        console.log('Google Drive処理を開始')
-        console.log('環境変数チェック:', {
-          hasClientEmail: !!process.env.GOOGLE_CLIENT_EMAIL,
-          hasPrivateKey: !!process.env.GOOGLE_PRIVATE_KEY,
-          hasFolderId: !!process.env.GOOGLE_DRIVE_FOLDER_ID
-        })
-        
-        const { uploadToDrive } = await import("@/lib/google-drive")
-        console.log('uploadToDrive関数をインポートしました')
-        
-        driveUrl = await uploadToDrive(pdfBuffer, filename, contentType)
-        console.log('Google Driveへのアップロード完了:', driveUrl)
-      } catch (driveError) {
-        console.error('Google Drive処理エラー（スキップします）:', {
-          error: driveError instanceof Error ? driveError.message : 'Unknown error',
-          stack: driveError instanceof Error ? driveError.stack : undefined
-        })
-      }
-
-      // Slack通知
-      const slackToken = process.env.SLACK_BOT_TOKEN
-      const slackChannel = process.env.SLACK_CHANNEL_ID
-
-      if (slackToken && slackChannel) {
-        console.log('Slack通知の送信を開始')
-        
-        const slackMessage = driveUrl 
-          ? `注文書PDFを出力しました (${targetOrders.length}件)\nGoogle Drive: ${driveUrl}`
-          : `注文書PDFを出力しました (${targetOrders.length}件)\nファイルはダウンロードで取得してください。`
-
-        const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${slackToken}`
-          },
-          body: JSON.stringify({
-            channel: slackChannel,
-            text: slackMessage,
-            unfurl_links: true
-          })
-        })
-        
-        const slackData = await slackRes.json()
-        
-        if (!slackData.ok) {
-          console.error("Slackメッセージ送信エラー:", slackData.error)
-        } else {
-          console.log("Slack通知送信成功")
-        }
-      }
-
-      // PDFをダウンロードとして返す
-      return new NextResponse(pdfBuffer, {
-        headers: {
-          'Content-Type': contentType,
-          'Content-Disposition': `attachment; filename="${filename}"`,
-          'Content-Length': pdfBuffer.length.toString(),
-        }
+    // Google Drive アップロードとSlack通知
+    let driveUrl: string | null = null
+    let slackFileUploaded = false
+    
+    try {
+      // Google Drive アップロードを試行
+      console.log('Google Drive処理を開始')
+      console.log('環境変数チェック:', {
+        hasClientEmail: !!process.env.GOOGLE_CLIENT_EMAIL,
+        hasPrivateKey: !!process.env.GOOGLE_PRIVATE_KEY,
+        hasFolderId: !!process.env.GOOGLE_DRIVE_FOLDER_ID
       })
-
-    } else {
-      // Excel生成（デフォルト）
-      filename = `orders_${now.toISOString().split('T')[0]}.xlsx`
-      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       
-      const excelBuffer = generateExcel(exportData)
-      const fileBuffer = new Uint8Array(excelBuffer)
-
-      return new NextResponse(fileBuffer, {
-        headers: {
-          'Content-Type': contentType,
-          'Content-Disposition': `attachment; filename="${filename}"`,
-          'Content-Length': fileBuffer.length.toString(),
-        },
+      const { uploadToDrive } = await import("@/lib/google-drive")
+      console.log('uploadToDrive関数をインポートしました')
+      
+      driveUrl = await uploadToDrive(fileBuffer, filename, contentType)
+      console.log('Google Driveへのアップロード完了:', driveUrl)
+    } catch (driveError) {
+      console.warn('Google Drive処理エラー（続行します）:', {
+        error: driveError instanceof Error ? driveError.message : 'Unknown error',
+        stack: driveError instanceof Error ? driveError.stack : undefined
       })
     }
+
+    // Slack通知（ファイル送信またはGoogle Driveリンク）
+    const slackToken = process.env.SLACK_BOT_TOKEN
+    const slackChannel = process.env.SLACK_CHANNEL_ID
+
+    if (slackToken && slackChannel) {
+      console.log('Slack通知の送信を開始')
+      
+      try {
+        if (driveUrl) {
+          // Google Driveリンクをシェア
+          const slackMessage = `注文書Excelファイルを出力しました (${targetOrders.length}件)\nGoogle Drive: ${driveUrl}`
+          
+          const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${slackToken}`
+            },
+            body: JSON.stringify({
+              channel: slackChannel,
+              text: slackMessage,
+              unfurl_links: true
+            })
+          })
+          
+          const slackData = await slackRes.json()
+          
+          if (!slackData.ok) {
+            console.error("Slackメッセージ送信エラー:", slackData.error)
+          } else {
+            console.log("Slack通知送信成功")
+          }
+        } else {
+          // 直接ファイルをSlackにアップロード
+          console.log('Slackへの直接ファイルアップロードを試行')
+          
+          const formData = new FormData()
+          formData.append('file', new Blob([fileBuffer], { type: contentType }), filename)
+          formData.append('channels', slackChannel)
+          formData.append('initial_comment', `注文書Excelファイルを出力しました (${targetOrders.length}件)`)
+          formData.append('filename', filename)
+          
+          const uploadRes = await fetch('https://slack.com/api/files.upload', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${slackToken}`
+            },
+            body: formData
+          })
+          
+          const uploadData = await uploadRes.json()
+          
+          if (uploadData.ok) {
+            console.log('Slackファイルアップロード成功')
+            slackFileUploaded = true
+          } else {
+            console.error('Slackファイルアップロードエラー:', uploadData.error)
+            
+            // フォールバック: シンプルなメッセージ送信
+            const fallbackRes = await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${slackToken}`
+              },
+              body: JSON.stringify({
+                channel: slackChannel,
+                text: `注文書Excelファイルを出力しました (${targetOrders.length}件)\nファイルはWebからダウンロードしてください。`
+              })
+            })
+            
+            if (fallbackRes.ok) {
+              console.log("フォールバックSlack通知送信成功")
+            }
+          }
+        }
+      } catch (slackError) {
+        console.error('Slack送信エラー:', slackError)
+      }
+    }
+
+    // Excelファイルをダウンロードとして返す
+    return new NextResponse(fileBuffer, {
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': fileBuffer.length.toString(),
+      },
+    })
 
   } catch (error) {
     console.error("データ処理エラー:", error)
@@ -195,180 +227,36 @@ export async function POST(request: Request) {
   }
 }
 
-// jsPDFを使用したPDF生成関数（日本語対応版）
-async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
-  const { jsPDF } = await import('jspdf')
-  
-  console.log('jsPDFインスタンスを作成中...')
-  
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  })
-  
-  console.log('jsPDF作成完了')
-
-  // 日本語フォントを追加
-  try {
-    addJapaneseFont(doc)
-    console.log('日本語フォント追加完了')
-  } catch (error) {
-    console.warn('日本語フォント追加に失敗:', error)
-  }
-
-  // ページ設定
-  const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
-  const margin = 20
-  let currentY = margin + 20
-
-  // タイトル
-  setFontPreset(doc, 'TITLE')
-  doc.text('注文書', pageWidth / 2, currentY, { align: 'center' })
-  currentY += 10
-
-  // 出力日時
-  setFontPreset(doc, 'SMALL')
-  doc.text(`出力日時: ${date.toLocaleString('ja-JP')}`, margin, currentY)
-  currentY += 15
-
-  // テーブルヘッダー
-  const headers = ['商品名', '数量', '発注タイプ', '発注者', '発注日', '理由']
-  const columnWidths = [60, 20, 25, 25, 25, 45] // mm単位
-  const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0)
-  const startX = (pageWidth - totalWidth) / 2
-
-  // ヘッダー背景（長方形）
-  doc.setFillColor(66, 139, 202) // #428bca
-  doc.rect(startX, currentY - 5, totalWidth, 10, 'F')
-
-  // ヘッダーテキスト
-  doc.setTextColor(255, 255, 255) // 白色
-  setJapaneseFont(doc, 9)
-  
-  let xPos = startX
-  headers.forEach((header, i) => {
-    const cellCenterX = xPos + columnWidths[i] / 2
-    doc.text(header, cellCenterX, currentY, { align: 'center' })
-    xPos += columnWidths[i]
-  })
-
-  currentY += 10
-
-  // データ行
-  doc.setTextColor(0, 0, 0) // 黒色
-  setJapaneseFont(doc, 7)
-
-  data.forEach((row, rowIndex) => {
-    // ページ改行チェック
-    if (currentY > pageHeight - 30) {
-      doc.addPage()
-      
-      // 新しいページでも日本語フォントを設定
-      try {
-        addJapaneseFont(doc)
-      } catch (error) {
-        console.warn('新ページでの日本語フォント追加に失敗:', error)
-      }
-      
-      currentY = margin
-    }
-
-    // 行の背景色（交互）
-    if (rowIndex % 2 === 0) {
-      doc.setFillColor(248, 249, 250) // #f8f9fa
-      doc.rect(startX, currentY - 3, totalWidth, 8, 'F')
-    }
-
-    // セルデータ（日本語対応の文字数制限）
-    const rowData = [
-      truncateText(row.商品名 || '', 20), // 日本語文字数を考慮した制限
-      (row.数量 || '').toString(),
-      (row.発注タイプ || '').toString(),
-      truncateText(row.発注者 || '', 8),
-      (row.発注日 || '').toString(),
-      truncateText(row.理由 || '', 15)
-    ]
-
-    xPos = startX
-    setJapaneseFont(doc, 7) // データ行のフォントサイズ
-    
-    rowData.forEach((cellData, colIndex) => {
-      const cellCenterX = xPos + columnWidths[colIndex] / 2
-      
-      // 長いテキストの場合は改行または省略
-      if (colIndex === 0 || colIndex === 5) { // 商品名と理由
-        // 改行処理（日本語対応）
-        const lines = splitText(doc, cellData, columnWidths[colIndex] - 4)
-        if (lines.length > 1) {
-          // 複数行の場合は最初の行のみ表示し、省略記号を追加
-          const truncatedText = lines[0] + (lines.length > 1 ? '...' : '')
-          doc.text(truncatedText, xPos + 2, currentY)
-        } else {
-          doc.text(cellData, xPos + 2, currentY)
-        }
-      } else {
-        doc.text(cellData, cellCenterX, currentY, { align: 'center' })
-      }
-      
-      xPos += columnWidths[colIndex]
-    })
-
-    currentY += 8
-  })
-
-  // フッター
-  const footerY = pageHeight - 20
-  setFontPreset(doc, 'SMALL')
-  doc.text(`総件数: ${data.length}件`, margin, footerY)
-  doc.text(`ページ: 1`, pageWidth - margin - 20, footerY)
-
-  console.log('PDF内容の描画完了')
-
-  // PDFをバッファとして出力
-  const pdfArrayBuffer = doc.output('arraybuffer')
-  const pdfBuffer = Buffer.from(pdfArrayBuffer)
-  
-  console.log(`生成されたPDFサイズ: ${pdfBuffer.length} bytes`)
-  return pdfBuffer
-}
-
-// 日本語を考慮したテキスト切り詰め関数
-function truncateText(text: string, maxLength: number): string {
-  if (!text) return ''
-  
-  // 日本語文字（全角）を2文字分として計算
-  let length = 0
-  let result = ''
-  
-  for (const char of text) {
-    const charLength = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(char) ? 2 : 1
-    if (length + charLength > maxLength) {
-      break
-    }
-    result += char
-    length += charLength
-  }
-  
-  return result
-}
-
 // Excel生成関数
 function generateExcel(data: any[]): ArrayBuffer {
   const worksheet = XLSX.utils.json_to_sheet(data)
   
   const columnWidths = [
-    { wch: 30 },
-    { wch: 10 },
-    { wch: 12 },
-    { wch: 15 },
-    { wch: 12 },
-    { wch: 30 },
-    { wch: 40 },
-    { wch: 15 },
+    { wch: 30 }, // 商品名
+    { wch: 10 }, // 数量
+    { wch: 12 }, // 発注タイプ
+    { wch: 15 }, // 発注者
+    { wch: 12 }, // 発注日
+    { wch: 30 }, // 理由
+    { wch: 40 }, // 商品URL
+    { wch: 15 }, // 出力状態
   ]
   worksheet['!cols'] = columnWidths
+
+  // ヘッダー行のスタイル設定
+  const headerStyle = {
+    font: { bold: true, color: { rgb: "FFFFFF" } },
+    fill: { fgColor: { rgb: "428BCA" } },
+    alignment: { horizontal: "center", vertical: "center" }
+  }
+
+  // ヘッダー行のセル（A1からH1）にスタイルを適用
+  const headerCells = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1']
+  headerCells.forEach(cell => {
+    if (worksheet[cell]) {
+      worksheet[cell].s = headerStyle
+    }
+  })
 
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, worksheet, '注文履歴')

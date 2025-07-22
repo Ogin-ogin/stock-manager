@@ -7,11 +7,10 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Download, FileText, Search, ChevronDown, Calendar, Loader2 } from "lucide-react"
+import { Download, FileText, Search, ChevronDown, Calendar, Loader2, FileSpreadsheet } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 export default function OrderHistoryPage() {
@@ -25,7 +24,6 @@ export default function OrderHistoryPage() {
   
   // Export dialog state
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
-  const [exportFormat, setExportFormat] = useState('xlsx')
   const [includeExported, setIncludeExported] = useState(false)
   const [exportStartDate, setExportStartDate] = useState('')
 
@@ -34,7 +32,7 @@ export default function OrderHistoryPage() {
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        const response = await fetch('/api/orders/history') // 修正箇所
+        const response = await fetch('/api/orders/history')
 
         if (!response.ok) {
           throw new Error('Failed to fetch data')
@@ -95,16 +93,13 @@ export default function OrderHistoryPage() {
     setIsExporting(true)
     setExportDialogOpen(false)
     
-    const formatLabel = exportFormat === 'pdf' ? 'PDF' : 'Excel'
-    
     toast({
-      title: "注文書出力中",
-      description: `注文を${formatLabel}形式で出力しています...`,
+      title: "Excel出力中",
+      description: "注文をExcel形式で出力しています...",
     })
 
     try {
       const requestBody = {
-        format: exportFormat,
         includeExported: includeExported
       }
 
@@ -131,17 +126,17 @@ export default function OrderHistoryPage() {
       const contentDisposition = response.headers.get('Content-Disposition')
       const filename = contentDisposition 
         ? contentDisposition.split('filename=')[1].replace(/"/g, '')
-        : `orders_${new Date().toISOString().split('T')[0]}.${exportFormat === 'pdf' ? 'pdf' : 'xlsx'}`
+        : `orders_${new Date().toISOString().split('T')[0]}.xlsx`
 
       downloadFile(blob, filename)
 
       toast({
         title: "出力完了",
-        description: `注文書（${formatLabel}形式）をダウンロードしました。`,
+        description: "注文書（Excel形式）をダウンロードしました。Slackにも送信されました。",
       })
 
       // データを再取得して最新の状態に更新
-      const ordersResponse = await fetch('/api/orders/history') // 修正箇所
+      const ordersResponse = await fetch('/api/orders/history')
       if (ordersResponse.ok) {
         const ordersData = await ordersResponse.json()
         setOrderHistory(ordersData)
@@ -197,38 +192,33 @@ export default function OrderHistoryPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">注文履歴</h1>
-          <p className="text-muted-foreground">過去の発注履歴と注文書出力</p>
+          <p className="text-muted-foreground">過去の発注履歴とExcel注文書出力</p>
         </div>
         <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
           <DialogTrigger asChild>
             <Button disabled={isExporting}>
-              <Download className="w-4 h-4 mr-2" />
-              {isExporting ? "出力中..." : "注文書出力"}
-              <ChevronDown className="w-4 h-4 ml-2" />
+              {isExporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  出力中...
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Excel出力
+                  <ChevronDown className="w-4 h-4 ml-2" />
+                </>
+              )}
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>注文書出力設定</DialogTitle>
+              <DialogTitle>Excel注文書出力設定</DialogTitle>
               <DialogDescription>
-                出力形式と対象範囲を選択してください。
+                対象範囲を選択してください。ファイルはダウンロードされ、同時にSlackにも送信されます。
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="format" className="text-right">
-                  出力形式
-                </Label>
-                <Select value={exportFormat} onValueChange={setExportFormat}>
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="形式を選択" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="xlsx">Excel形式 (.xlsx)</SelectItem>
-                    <SelectItem value="pdf">PDF形式 (.pdf)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">
                   対象範囲
@@ -273,6 +263,29 @@ export default function OrderHistoryPage() {
                   }
                 </div>
               </div>
+              <div className="grid grid-cols-4 items-start gap-4">
+                <Label className="text-right text-sm text-muted-foreground pt-2">
+                  送信先
+                </Label>
+                <div className="col-span-3 text-sm space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <Download className="w-4 h-4" />
+                    <span>ダウンロード（ブラウザ）</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                      <div className="w-2 h-2 bg-white rounded-full"></div>
+                    </div>
+                    <span>Slack（自動送信）</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-muted-foreground">
+                    <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                      <div className="w-2 h-2 bg-white rounded-full"></div>
+                    </div>
+                    <span>Google Drive（可能な場合）</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -280,8 +293,8 @@ export default function OrderHistoryPage() {
                 onClick={handleExportOrders}
                 disabled={isExporting || (includeExported && !exportStartDate)}
               >
-                <Download className="w-4 h-4 mr-2" />
-                出力開始
+                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                Excel出力開始
               </Button>
             </DialogFooter>
           </DialogContent>
