@@ -115,11 +115,13 @@ export default function DashboardPage() {
         // 注文データを処理
         const processedOrders = ordersData.slice(0, 3).map((order: any) => ({
           id: order.id,
-          productName: order.productName || order.product?.name || '不明な商品',
-          quantity: order.quantity || 0,
-          orderType: order.isAutoOrder ? 'auto' : 'manual',
-          createdAt: order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          status: order.status || 'pending'
+          productName: order.product?.name || "不明な商品",
+          quantity: parseInt(order.orderQty, 10) || 0,
+          orderType: order.orderType === "AUTO" ? "auto" : "manual",
+          createdAt: order.orderDate
+            ? new Date(order.orderDate).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0],
+          status: "completed"
         }))
 
         // 統計データを計算
