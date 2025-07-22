@@ -6,9 +6,6 @@ import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
-// Vercelサーバーレス環境対応: requireで読み込む
-const { jsPDF } = require('jspdf');
-require('jspdf-autotable');
 
 type AutoTableConfig = {
   startY: number;
