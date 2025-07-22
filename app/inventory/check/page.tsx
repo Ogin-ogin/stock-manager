@@ -207,15 +207,12 @@ export default function InventoryCheckPage() {
 
       const result = await response.json()
       
-      // Show success message with auto-order info
       let message = "在庫点検が正常に保存されました。"
       if (result.autoOrdersCreated > 0) {
         message += `\n${result.autoOrdersCreated}件の自動発注を作成しました。`
       }
       
       alert(message)
-      
-      // Redirect back to inventory page
       router.push("/inventory")
       
     } catch (e) {
@@ -251,7 +248,8 @@ export default function InventoryCheckPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 pb-24">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="sm" asChild>
@@ -297,14 +295,6 @@ export default function InventoryCheckPage() {
               総商品数: {inventoryItems.length}件 | 変更済み: {changedItemsCount}件
               {!checkerName.trim() && <span className="text-red-500 ml-2">（点検者名を入力してください）</span>}
             </div>
-            <Button 
-              onClick={handleSaveInventory}
-              disabled={saving || !checkerName.trim()}
-              variant={!checkerName.trim() ? "secondary" : "default"}
-            >
-              <Save className="w-4 h-4 mr-2" />
-              {saving ? "保存中..." : "点検結果を保存"}
-            </Button>
           </div>
         </CardContent>
       </Card>
@@ -328,7 +318,6 @@ export default function InventoryCheckPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Current Stock Display */}
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">現在在庫</span>
                 <div className="flex items-center gap-2">
@@ -341,20 +330,17 @@ export default function InventoryCheckPage() {
                 </div>
               </div>
 
-              {/* Original vs Updated Stock */}
               {item.hasChanged && (
                 <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
                   元の在庫: {item.currentStock} → {item.updatedStock}
                 </div>
               )}
 
-              {/* Default Order Quantity */}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">標準発注数</span>
                 <span>{item.defaultQty}</span>
               </div>
 
-              {/* Action Hint */}
               <div className="text-center pt-2">
                 <span className="text-xs text-muted-foreground">タップして在庫数を更新</span>
               </div>
@@ -370,6 +356,21 @@ export default function InventoryCheckPage() {
         onClose={() => setDialogOpen(false)}
         onUpdate={handleStockUpdate}
       />
+
+      {/* ✅ 画面下固定ボタン */}
+      <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-4 shadow-lg">
+        <div className="max-w-screen-md mx-auto">
+          <Button
+            onClick={handleSaveInventory}
+            disabled={saving || !checkerName.trim()}
+            variant={!checkerName.trim() ? "secondary" : "default"}
+            className="w-full h-14 text-base font-semibold"
+          >
+            <Save className="w-5 h-5 mr-2" />
+            {saving ? "保存中..." : "点検結果を保存"}
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }
