@@ -2,6 +2,7 @@ export const runtime = "nodejs"
 import { NextResponse } from "next/server"
 import { ordersAPI, productsAPI } from "@/lib/sheets"
 import { sendSlackNotification, createOrderCompletedMessage } from "@/lib/slack"
+import { addJapaneseFont, setJapaneseFont, splitText, FONT_PRESETS, setFontPreset } from "@/lib/jp-fonts"
 import * as XLSX from 'xlsx'
 
 declare global {
@@ -194,7 +195,7 @@ export async function POST(request: Request) {
   }
 }
 
-// jsPDFを使用したPDF生成関数（サーバーレス環境対応）
+// jsPDFを使用したPDF生成関数（日本語対応版）
 async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
   const { jsPDF } = await import('jspdf')
   
@@ -208,6 +209,14 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
   
   console.log('jsPDF作成完了')
 
+  // 日本語フォントを追加
+  try {
+    addJapaneseFont(doc)
+    console.log('日本語フォント追加完了')
+  } catch (error) {
+    console.warn('日本語フォント追加に失敗:', error)
+  }
+
   // ページ設定
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
@@ -215,12 +224,12 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
   let currentY = margin + 20
 
   // タイトル
-  doc.setFontSize(16)
+  setFontPreset(doc, 'TITLE')
   doc.text('注文書', pageWidth / 2, currentY, { align: 'center' })
   currentY += 10
 
   // 出力日時
-  doc.setFontSize(8)
+  setFontPreset(doc, 'SMALL')
   doc.text(`出力日時: ${date.toLocaleString('ja-JP')}`, margin, currentY)
   currentY += 15
 
@@ -236,7 +245,7 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
 
   // ヘッダーテキスト
   doc.setTextColor(255, 255, 255) // 白色
-  doc.setFontSize(9)
+  setJapaneseFont(doc, 9)
   
   let xPos = startX
   headers.forEach((header, i) => {
@@ -249,12 +258,20 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
 
   // データ行
   doc.setTextColor(0, 0, 0) // 黒色
-  doc.setFontSize(7)
+  setJapaneseFont(doc, 7)
 
   data.forEach((row, rowIndex) => {
     // ページ改行チェック
     if (currentY > pageHeight - 30) {
       doc.addPage()
+      
+      // 新しいページでも日本語フォントを設定
+      try {
+        addJapaneseFont(doc)
+      } catch (error) {
+        console.warn('新ページでの日本語フォント追加に失敗:', error)
+      }
+      
       currentY = margin
     }
 
@@ -264,23 +281,33 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
       doc.rect(startX, currentY - 3, totalWidth, 8, 'F')
     }
 
-    // セルデータ
+    // セルデータ（日本語対応の文字数制限）
     const rowData = [
-      (row.商品名 || '').toString().substring(0, 20), // 文字数制限
+      truncateText(row.商品名 || '', 20), // 日本語文字数を考慮した制限
       (row.数量 || '').toString(),
       (row.発注タイプ || '').toString(),
-      (row.発注者 || '').toString().substring(0, 8),
+      truncateText(row.発注者 || '', 8),
       (row.発注日 || '').toString(),
-      (row.理由 || '').toString().substring(0, 15)
+      truncateText(row.理由 || '', 15)
     ]
 
     xPos = startX
+    setJapaneseFont(doc, 7) // データ行のフォントサイズ
+    
     rowData.forEach((cellData, colIndex) => {
       const cellCenterX = xPos + columnWidths[colIndex] / 2
       
       // 長いテキストの場合は改行または省略
       if (colIndex === 0 || colIndex === 5) { // 商品名と理由
-        doc.text(cellData, xPos + 2, currentY, { maxWidth: columnWidths[colIndex] - 4 })
+        // 改行処理（日本語対応）
+        const lines = splitText(doc, cellData, columnWidths[colIndex] - 4)
+        if (lines.length > 1) {
+          // 複数行の場合は最初の行のみ表示し、省略記号を追加
+          const truncatedText = lines[0] + (lines.length > 1 ? '...' : '')
+          doc.text(truncatedText, xPos + 2, currentY)
+        } else {
+          doc.text(cellData, xPos + 2, currentY)
+        }
       } else {
         doc.text(cellData, cellCenterX, currentY, { align: 'center' })
       }
@@ -293,7 +320,7 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
 
   // フッター
   const footerY = pageHeight - 20
-  doc.setFontSize(8)
+  setFontPreset(doc, 'SMALL')
   doc.text(`総件数: ${data.length}件`, margin, footerY)
   doc.text(`ページ: 1`, pageWidth - margin - 20, footerY)
 
@@ -305,6 +332,26 @@ async function generatePDFWithJsPDF(data: any[], date: Date): Promise<Buffer> {
   
   console.log(`生成されたPDFサイズ: ${pdfBuffer.length} bytes`)
   return pdfBuffer
+}
+
+// 日本語を考慮したテキスト切り詰め関数
+function truncateText(text: string, maxLength: number): string {
+  if (!text) return ''
+  
+  // 日本語文字（全角）を2文字分として計算
+  let length = 0
+  let result = ''
+  
+  for (const char of text) {
+    const charLength = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(char) ? 2 : 1
+    if (length + charLength > maxLength) {
+      break
+    }
+    result += char
+    length += charLength
+  }
+  
+  return result
 }
 
 // Excel生成関数
