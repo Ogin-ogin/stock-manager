@@ -1,17 +1,16 @@
 import { google } from 'googleapis';
-import { JWT } from 'google-auth-library';
-import { Readable } from 'stream';  // ← 追加
-
-// Google Drive APIの認証情報
-const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+import { OAuth2Client } from 'google-auth-library';
+import { Readable } from 'stream';
 
 interface GoogleDriveConfig {
-  clientEmail: string;
-  privateKey: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  refreshToken: string;
   folderId: string;
 }
 
-// ✅ Buffer を Readable Stream に変換するヘルパー
+// Buffer → Readable Stream
 function bufferToStream(buffer: Buffer): Readable {
   const stream = new Readable();
   stream.push(buffer);
@@ -19,43 +18,47 @@ function bufferToStream(buffer: Buffer): Readable {
   return stream;
 }
 
-export async function uploadToDrive(
+export async function uploadToDriveOAuth(
   fileBuffer: Buffer,
   fileName: string,
   mimeType: string
 ): Promise<string> {
   try {
     const config: GoogleDriveConfig = {
-      clientEmail: process.env.GOOGLE_CLIENT_EMAIL || '',
-      privateKey: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+      clientId: process.env.GOOGLE_CLIENT_ID || '',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      redirectUri: process.env.GOOGLE_REDIRECT_URI || '',
+      refreshToken: process.env.GOOGLE_REFRESH_TOKEN || '',
       folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || ''
     };
 
-    if (!config.clientEmail || !config.privateKey || !config.folderId) {
-      throw new Error('Google Drive credentials are not properly configured');
+    if (!config.clientId || !config.clientSecret || !config.refreshToken || !config.folderId) {
+      throw new Error('Google Drive OAuth credentials are not properly configured');
     }
 
-    // JWTクライアントの作成
-    const auth = new JWT({
-      email: config.clientEmail,
-      key: config.privateKey,
-      scopes: SCOPES,
-    });
+    // OAuth2 クライアント作成
+    const oauth2Client = new google.auth.OAuth2(
+      config.clientId,
+      config.clientSecret,
+      config.redirectUri
+    );
 
-    const drive = google.drive({ version: 'v3', auth });
+    oauth2Client.setCredentials({ refresh_token: config.refreshToken });
 
-    // ファイルのメタデータ
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+    // メタデータ
     const fileMetadata = {
       name: fileName,
       parents: [config.folderId]
     };
 
-    // ✅ Buffer を Readable Stream に変換してアップロード
+    // アップロード
     const response = await drive.files.create({
       requestBody: fileMetadata,
       media: {
         mimeType,
-        body: bufferToStream(fileBuffer)  // ← ここを修正
+        body: bufferToStream(fileBuffer)
       },
       fields: 'id, webViewLink'
     });
@@ -64,7 +67,7 @@ export async function uploadToDrive(
       throw new Error('Failed to get file link');
     }
 
-    // ✅ 公開リンクの権限を設定（リンクを知っている人なら誰でも閲覧可能）
+    // 公開権限設定
     await drive.permissions.create({
       fileId: response.data.id,
       requestBody: {
