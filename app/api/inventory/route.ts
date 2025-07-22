@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { productsAPI, inventoryAPI } from "@/lib/sheets"
+import { productsAPI, inventoryAPI, settingsAPI } from "@/lib/sheets"
 import { ConsumptionAnalyzer, type ConsumptionPattern } from "@/lib/consumption-analyzer"
 
 export const dynamic = "force-dynamic"
@@ -97,6 +97,12 @@ class InventoryStatusEvaluator {
 
 export async function GET() {
   try {
+    // 設定を取得
+    const settings = await settingsAPI.get()
+    if (!settings) {
+      return NextResponse.json({ error: "Settings not found" }, { status: 500 })
+    }
+
     const products = await productsAPI.getAll()
     const activeProducts = products.filter((p) => p.isActive)
 
@@ -129,8 +135,8 @@ export async function GET() {
         const currentStock = Number.parseInt(records[0].stockCount.toString())
         const lastCheckDate = records[0].checkDate
 
-        // 消費パターン分析
-        const analyzer = new ConsumptionAnalyzer(records)
+        // 消費パターン分析（設定を渡す）
+        const analyzer = new ConsumptionAnalyzer(records, settings)
         const consumptionPattern = analyzer.analyze()
 
         // 安全在庫計算

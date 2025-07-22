@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { inventoryAPI, productsAPI } from "@/lib/sheets"
+import { inventoryAPI, productsAPI, settingsAPI } from "@/lib/sheets"
 import { ConsumptionAnalyzer } from "@/lib/consumption-analyzer"
 
 export const dynamic = "force-dynamic"
@@ -9,6 +9,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const pastDays = Number.parseInt(searchParams.get("pastDays") || "30") // 過去データの表示期間
     const forecastDays = Number.parseInt(searchParams.get("forecastDays") || "7") // 予測データの表示期間
+
+    // 設定を取得
+    const settings = await settingsAPI.get()
+    if (!settings) {
+      return NextResponse.json({ error: "Settings not found" }, { status: 500 })
+    }
 
     const historicalRecords = await inventoryAPI.getHistory(pastDays)
     const products = await productsAPI.getAll()
@@ -85,7 +91,7 @@ export async function GET(request: NextRequest) {
 
       // その商品の全在庫履歴を取得してConsumptionAnalyzerで分析
       const productRecords = await inventoryAPI.getByProductId(product.id)
-      const analyzer = new ConsumptionAnalyzer(productRecords)
+      const analyzer = new ConsumptionAnalyzer(productRecords, settings) // 設定を渡す
       const consumptionPattern = analyzer.analyze()
       productConsumptionPatterns[product.id] = consumptionPattern
     }

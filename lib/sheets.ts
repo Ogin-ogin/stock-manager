@@ -41,8 +41,8 @@ interface Settings {
   slackWebhookUrl: string
   systemName: string
   adminEmail: string
-  graphPastDays: number // 新しい設定項目: 過去データの表示期間
-  graphForecastDays: number // 新しい設定項目: 予測データの表示期間
+  graphPastDays: number 
+  graphForecastDays: number 
 }
 
 // Google Sheets API のベースURL

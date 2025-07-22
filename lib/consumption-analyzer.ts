@@ -6,6 +6,21 @@ interface InventoryRecord {
   checkerName: string
 }
 
+interface Settings {
+  id: string
+  consumptionCalcDays: number
+  reorderThresholdDays: number
+  reminderDay: number
+  reminderTime: string
+  exportDay: number
+  exportTime: string
+  slackWebhookUrl: string
+  systemName: string
+  adminEmail: string
+  graphPastDays: number 
+  graphForecastDays: number 
+}
+
 export interface ConsumptionPattern {
   averageDailyConsumption: number
   consumptionVariability: number
@@ -16,8 +31,9 @@ export interface ConsumptionPattern {
 // 消費パターン分析クラス
 export class ConsumptionAnalyzer {
   private records: InventoryRecord[]
+  private consumptionCalcDays: number
 
-  constructor(records: InventoryRecord[]) {
+  constructor(records: InventoryRecord[], settings: Settings) {
     // checkDateでソートし、stockCountを数値に変換
     this.records = records
       .map((record) => ({
@@ -25,10 +41,13 @@ export class ConsumptionAnalyzer {
         stockCount: Number(record.stockCount), // 数値に変換
       }))
       .sort((a, b) => new Date(a.checkDate).getTime() - new Date(b.checkDate).getTime())
+    
+    // 設定から消費計算日数を取得（最小値を1に設定）
+    this.consumptionCalcDays = Math.max(1, settings.consumptionCalcDays)
   }
 
-  // 移動平均を使った消費量計算
-  private calculateMovingAverage(windowSize = 3): number[] {
+  // 移動平均を使った消費量計算（windowSizeを設定から取得）
+  private calculateMovingAverage(): number[] {
     if (this.records.length < 2) return []
 
     const dailyConsumptions: number[] = []
@@ -48,7 +67,8 @@ export class ConsumptionAnalyzer {
       dailyConsumptions.push(consumption)
     }
 
-    // 移動平均の計算
+    // 移動平均の計算（windowSizeを設定値から使用）
+    const windowSize = this.consumptionCalcDays
     const movingAverages: number[] = []
     for (let i = 0; i < dailyConsumptions.length; i++) {
       const start = Math.max(0, i - windowSize + 1)
