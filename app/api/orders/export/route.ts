@@ -195,13 +195,13 @@ export async function POST(request: Request) {
   }
 }
 
-// PDFKitを使用したPDF生成関数
+// PDFKitを使用したPDF生成関数（フォント問題を修正）
 async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
       console.log('PDFKitインスタンスを作成中...')
       
-      // PDFDocument作成（日本語フォント対応）
+      // PDFDocument作成（フォントを指定せずに作成）
       const doc = new PDFDocument({
         size: 'A4',
         margin: 50,
@@ -234,18 +234,13 @@ async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
         reject(error)
       })
 
-      // 日本語フォントの設定を試行
+      // フォント設定を削除または安全な設定に変更
       try {
-        // Noto Sans JPフォントまたは代替フォントを使用
-        // フォントファイルが利用可能な場合の設定
-        // doc.font('/path/to/NotoSansJP-Regular.ttf')
-        
-        // 代替案: PDFKitの標準フォント（一部日本語対応）
-        doc.font('Helvetica')
-        console.log('フォント設定完了（Helvetica）')
+        // 明示的なフォント設定は行わず、デフォルトフォントを使用
+        console.log('デフォルトフォントを使用')
       } catch (fontError) {
         console.warn('フォント設定エラー:', fontError)
-        // デフォルトフォントを使用
+        // エラーが発生してもデフォルトフォントで続行
       }
 
       // ページ設定
@@ -270,11 +265,10 @@ async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
       
       // ヘッダー背景
       doc.rect(50, currentY, totalWidth, 25)
-         .fill('#428bca')
-         .stroke()
+         .fillAndStroke('#428bca', '#000000')
 
       // ヘッダーテキスト
-      doc.fill('#ffffff')
+      doc.fillColor('#ffffff')
          .fontSize(9)
       
       let xPos = 50
@@ -287,7 +281,7 @@ async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
       currentY += 25
 
       // データ行
-      doc.fill('#000000') // テキスト色を黒に戻す
+      doc.fillColor('#000000') // テキスト色を黒に戻す
       
       data.forEach((row, rowIndex) => {
         // ページ改行チェック
@@ -299,11 +293,10 @@ async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
         // 行の背景色（交互）
         if (rowIndex % 2 === 0) {
           doc.rect(50, currentY, totalWidth, 20)
-             .fill('#f8f9fa')
-             .stroke()
+             .fillAndStroke('#f8f9fa', '#cccccc')
         } else {
           doc.rect(50, currentY, totalWidth, 20)
-             .stroke()
+             .stroke('#cccccc')
         }
 
         // セルデータ
@@ -316,7 +309,7 @@ async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
           (row.理由 || '').toString().substring(0, 20)
         ]
 
-        doc.fill('#000000')
+        doc.fillColor('#000000')
            .fontSize(8)
         
         xPos = 50
@@ -326,12 +319,18 @@ async function generatePDFWithPDFKit(data: any[], date: Date): Promise<Buffer> {
           const maxWidth = columnWidths[colIndex] - 4 // パディング
           
           // テキストを複数行に分割する場合の処理
-          const lines = doc.heightOfString(cellData, { width: maxWidth })
-          if (lines > 14) { // セルの高さを超える場合は短縮
-            const truncated = cellData.substring(0, Math.floor(cellData.length * 14 / lines)) + '...'
-            doc.text(truncated, xPos + 2, cellY, { width: maxWidth })
-          } else {
-            doc.text(cellData, xPos + 2, cellY, { width: maxWidth })
+          try {
+            const lines = doc.heightOfString(cellData, { width: maxWidth })
+            if (lines > 14) { // セルの高さを超える場合は短縮
+              const truncated = cellData.substring(0, Math.floor(cellData.length * 14 / lines)) + '...'
+              doc.text(truncated, xPos + 2, cellY, { width: maxWidth })
+            } else {
+              doc.text(cellData, xPos + 2, cellY, { width: maxWidth })
+            }
+          } catch (textError) {
+            // テキスト描画でエラーが発生した場合は、シンプルに文字列を描画
+            console.warn('テキスト描画エラー:', textError)
+            doc.text(cellData.substring(0, 20), xPos + 2, cellY)
           }
           
           xPos += columnWidths[colIndex]
