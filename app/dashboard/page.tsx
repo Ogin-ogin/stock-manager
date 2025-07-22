@@ -8,50 +8,215 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { StockHistoryChart } from "@/components/charts/stock-history-chart"
 
-export default function DashboardPage() {
-  // Mock data - in real app, this would come from API
-  const [inventoryStatus, setInventoryStatus] = useState([
-    { name: "プロワイプ（250枚入り）", stock: 2, status: "low", lastCheck: "2024-01-15" },
-    { name: "キムタオル", stock: 8, status: "normal", lastCheck: "2024-01-15" },
-    { name: "ゴム手袋（M）", stock: 1, status: "critical", lastCheck: "2024-01-14" },
-    { name: "通常マスク（50枚入り）", stock: 12, status: "normal", lastCheck: "2024-01-15" },
-  ])
+interface InventoryItem {
+  id: string
+  name: string
+  currentStock: number
+  minThreshold: number
+  maxThreshold: number
+  lastChecked: string
+  status: 'critical' | 'low' | 'normal'
+}
 
-  const recentOrders = [
-    { product: "プロワイプ（250枚入り）", qty: 5, type: "auto", date: "2024-01-10" },
-    { product: "ゴム手袋（S）", qty: 10, type: "manual", date: "2024-01-08" },
-    { product: "キムタオル", qty: 3, type: "auto", date: "2024-01-05" },
-  ]
+interface Order {
+  id: string
+  productName: string
+  quantity: number
+  orderType: 'auto' | 'manual'
+  createdAt: string
+  status: string
+}
+
+interface DashboardStats {
+  totalProducts: number
+  productsNeedingOrder: number
+  ordersThisMonth: number
+  ordersGrowthPercent: number
+  nextInspectionDate: string
+}
+
+export default function DashboardPage() {
+  const [inventoryStatus, setInventoryStatus] = useState<InventoryItem[]>([])
+  const [recentOrders, setRecentOrders] = useState<Order[]>([])
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
+    totalProducts: 0,
+    productsNeedingOrder: 0,
+    ordersThisMonth: 0,
+    ordersGrowthPercent: 0,
+    nextInspectionDate: ''
+  })
+  const [notifications, setNotifications] = useState<Array<{
+    type: 'warning' | 'info'
+    title: string
+    message: string
+    icon: any
+  }>>([])
 
   const [graphData, setGraphData] = useState<any[]>([])
   const [productNamesForGraph, setProductNamesForGraph] = useState<string[]>([])
   const [graphLoading, setGraphLoading] = useState(true)
   const [graphError, setGraphError] = useState<string | null>(null)
-  const [settings, setSettings] = useState<any>({ graphPastDays: 30, graphForecastDays: 7 }) // 初期値を設定
+  const [settings, setSettings] = useState<any>({ graphPastDays: 30, graphForecastDays: 7 })
+  
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    async function fetchGraphData() {
-      setGraphLoading(true)
-      setGraphError(null)
+    async function fetchDashboardData() {
+      setLoading(true)
+      setError(null)
+      
       try {
-        // 設定からグラフ表示期間を取得
-        const settingsResponse = await fetch("/api/settings")
+        // 並列でデータを取得
+        const [
+          inventoryResponse,
+          ordersResponse,
+          settingsResponse
+        ] = await Promise.all([
+          fetch('/api/inventory'),
+          fetch('/api/orders/history?limit=10'),
+          fetch('/api/settings')
+        ])
+
+        if (!inventoryResponse.ok) {
+          throw new Error(`Failed to fetch inventory: ${inventoryResponse.status}`)
+        }
+        if (!ordersResponse.ok) {
+          throw new Error(`Failed to fetch orders: ${ordersResponse.status}`)
+        }
         if (!settingsResponse.ok) {
           throw new Error(`Failed to fetch settings: ${settingsResponse.status}`)
         }
-        const settingsData = await settingsResponse.json()
-        setSettings(settingsData)
-        const pastDays = settingsData.graphPastDays || 30
-        const forecastDays = settingsData.graphForecastDays || 7
 
-        // 在庫履歴データを取得
+        const inventoryData = await inventoryResponse.json()
+        const ordersData = await ordersResponse.json()
+        const settingsData = await settingsResponse.json()
+
+        // 在庫データを処理
+        const processedInventory = inventoryData.map((item: any) => {
+          let status: 'critical' | 'low' | 'normal' = 'normal'
+          if (item.currentStock <= 0 || item.currentStock <= item.minThreshold * 0.5) {
+            status = 'critical'
+          } else if (item.currentStock <= item.minThreshold) {
+            status = 'low'
+          }
+
+          return {
+            id: item.id,
+            name: item.name,
+            currentStock: item.currentStock || 0,
+            minThreshold: item.minThreshold || 0,
+            maxThreshold: item.maxThreshold || 0,
+            lastChecked: item.lastChecked || new Date().toISOString().split('T')[0],
+            status
+          }
+        })
+
+        // 注文データを処理
+        const processedOrders = ordersData.slice(0, 3).map((order: any) => ({
+          id: order.id,
+          productName: order.productName || order.product?.name || '不明な商品',
+          quantity: order.quantity || 0,
+          orderType: order.isAutoOrder ? 'auto' : 'manual',
+          createdAt: order.createdAt ? new Date(order.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          status: order.status || 'pending'
+        }))
+
+        // 統計データを計算
+        const totalProducts = inventoryData.length
+        const productsNeedingOrder = processedInventory.filter(item => 
+          item.status === 'critical' || item.status === 'low'
+        ).length
+
+        // 今月の注文数を計算
+        const currentMonth = new Date().getMonth()
+        const currentYear = new Date().getFullYear()
+        const ordersThisMonth = ordersData.filter((order: any) => {
+          const orderDate = new Date(order.createdAt)
+          return orderDate.getMonth() === currentMonth && orderDate.getFullYear() === currentYear
+        }).length
+
+        // 前月との比較（簡易版）
+        const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1
+        const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear
+        const ordersLastMonth = ordersData.filter((order: any) => {
+          const orderDate = new Date(order.createdAt)
+          return orderDate.getMonth() === lastMonth && orderDate.getFullYear() === lastMonthYear
+        }).length
+
+        const ordersGrowthPercent = ordersLastMonth > 0 
+          ? Math.round(((ordersThisMonth - ordersLastMonth) / ordersLastMonth) * 100)
+          : 0
+
+        // 次回点検日を計算（設定があれば使用、なければ来週の金曜日）
+        const nextFriday = new Date()
+        nextFriday.setDate(nextFriday.getDate() + (5 - nextFriday.getDay() + 7) % 7)
+        const nextInspectionDate = nextFriday.toLocaleDateString('ja-JP', {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric'
+        })
+
+        setInventoryStatus(processedInventory.slice(0, 4)) // 上位4つのみ表示
+        setRecentOrders(processedOrders)
+        setDashboardStats({
+          totalProducts,
+          productsNeedingOrder,
+          ordersThisMonth,
+          ordersGrowthPercent,
+          nextInspectionDate
+        })
+        setSettings(settingsData)
+
+        // 通知を生成
+        const newNotifications = []
+        const criticalItems = processedInventory.filter(item => item.status === 'critical')
+        if (criticalItems.length > 0) {
+          newNotifications.push({
+            type: 'warning' as const,
+            title: '在庫不足の商品があります',
+            message: `${criticalItems[0].name}の在庫が${criticalItems[0].currentStock}個まで減少しています。`,
+            icon: AlertTriangle
+          })
+        }
+
+        newNotifications.push({
+          type: 'info' as const,
+          title: '次回在庫点検のお知らせ',
+          message: `${nextInspectionDate}に在庫点検のリマインダーが送信されます。`,
+          icon: Calendar
+        })
+
+        setNotifications(newNotifications)
+
+      } catch (e: any) {
+        setError(e.message)
+        console.error("Error fetching dashboard data:", e)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDashboardData()
+  }, [])
+
+  // グラフデータを別途取得
+  useEffect(() => {
+    async function fetchGraphData() {
+      if (!settings.graphPastDays) return // 設定が読み込まれるまで待つ
+      
+      setGraphLoading(true)
+      setGraphError(null)
+      try {
+        const pastDays = settings.graphPastDays || 30
+        const forecastDays = settings.graphForecastDays || 7
+
         const historyResponse = await fetch(`/api/inventory/history?pastDays=${pastDays}&forecastDays=${forecastDays}`)
         if (!historyResponse.ok) {
           throw new Error(`Failed to fetch inventory history: ${historyResponse.status}`)
         }
         const data = await historyResponse.json()
 
-        // グラフに表示する商品名を抽出
         if (data.length > 0) {
           const firstDataPoint = data[0]
           const names = Object.keys(firstDataPoint).filter((key) => key !== "date")
@@ -65,8 +230,9 @@ export default function DashboardPage() {
         setGraphLoading(false)
       }
     }
+
     fetchGraphData()
-  }, []) // 依存配列は空で初回のみ実行
+  }, [settings.graphPastDays, settings.graphForecastDays])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -77,6 +243,67 @@ export default function DashboardPage() {
       default:
         return "default"
     }
+  }
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case "critical":
+        return "要注文"
+      case "low":
+        return "少ない"
+      default:
+        return "正常"
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">ダッシュボード</h1>
+            <p className="text-muted-foreground">消耗品注文管理システム</p>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader>
+                <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="h-8 bg-gray-200 rounded animate-pulse mb-2"></div>
+                <div className="h-3 bg-gray-200 rounded animate-pulse"></div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">データを読み込み中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">ダッシュボード</h1>
+            <p className="text-muted-foreground">消耗品注文管理システム</p>
+          </div>
+        </div>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-5 h-5" />
+              <p>データの読み込みに失敗しました: {error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -110,7 +337,7 @@ export default function DashboardPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">24</div>
+            <div className="text-2xl font-bold">{dashboardStats.totalProducts}</div>
             <p className="text-xs text-muted-foreground">アクティブな商品</p>
           </CardContent>
         </Card>
@@ -120,7 +347,7 @@ export default function DashboardPage() {
             <AlertTriangle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">3</div>
+            <div className="text-2xl font-bold text-destructive">{dashboardStats.productsNeedingOrder}</div>
             <p className="text-xs text-muted-foreground">在庫不足の商品</p>
           </CardContent>
         </Card>
@@ -130,8 +357,10 @@ export default function DashboardPage() {
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
-            <p className="text-xs text-muted-foreground">+20% 前月比</p>
+            <div className="text-2xl font-bold">{dashboardStats.ordersThisMonth}</div>
+            <p className="text-xs text-muted-foreground">
+              {dashboardStats.ordersGrowthPercent >= 0 ? '+' : ''}{dashboardStats.ordersGrowthPercent}% 前月比
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -140,8 +369,10 @@ export default function DashboardPage() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">金曜日</div>
-            <p className="text-xs text-muted-foreground">1月19日 09:00</p>
+            <div className="text-2xl font-bold">
+              {dashboardStats.nextInspectionDate.split('日')[0] + '日'}
+            </div>
+            <p className="text-xs text-muted-foreground">09:00予定</p>
           </CardContent>
         </Card>
       </div>
@@ -174,7 +405,7 @@ export default function DashboardPage() {
             description={`過去${settings.graphPastDays}日間と将来${settings.graphForecastDays}日間の在庫数の変動`}
             data={graphData}
             productNames={productNamesForGraph}
-            pastDays={settings.graphPastDays} // 過去期間を渡す
+            pastDays={settings.graphPastDays}
           />
         )}
       </div>
@@ -190,20 +421,24 @@ export default function DashboardPage() {
             <CardDescription>現在の在庫レベル</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {inventoryStatus.map((item, index) => (
-              <div key={index} className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="font-medium">{item.name}</p>
-                  <p className="text-sm text-muted-foreground">最終点検: {item.lastCheck}</p>
+            {inventoryStatus.length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">在庫データがありません</p>
+            ) : (
+              inventoryStatus.map((item) => (
+                <div key={item.id} className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium">{item.name}</p>
+                    <p className="text-sm text-muted-foreground">最終点検: {item.lastChecked}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold">{item.currentStock}</span>
+                    <Badge variant={getStatusColor(item.status) as any}>
+                      {getStatusText(item.status)}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold">{item.stock}</span>
-                  <Badge variant={getStatusColor(item.status) as any}>
-                    {item.status === "critical" ? "要注文" : item.status === "low" ? "少ない" : "正常"}
-                  </Badge>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
             <Button variant="outline" className="w-full bg-transparent" asChild>
               <Link href="/inventory">詳細を見る</Link>
             </Button>
@@ -220,20 +455,24 @@ export default function DashboardPage() {
             <CardDescription>直近の発注履歴</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {recentOrders.map((order, index) => (
-              <div key={index} className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="font-medium">{order.product}</p>
-                  <p className="text-sm text-muted-foreground">{order.date}</p>
+            {recentOrders.length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">注文履歴がありません</p>
+            ) : (
+              recentOrders.map((order) => (
+                <div key={order.id} className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium">{order.productName}</p>
+                    <p className="text-sm text-muted-foreground">{order.createdAt}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold">{order.quantity}個</span>
+                    <Badge variant={order.orderType === "auto" ? "default" : "secondary"}>
+                      {order.orderType === "auto" ? "自動" : "手動"}
+                    </Badge>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold">{order.qty}個</span>
-                  <Badge variant={order.type === "auto" ? "default" : "secondary"}>
-                    {order.type === "auto" ? "自動" : "手動"}
-                  </Badge>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
             <Button variant="outline" className="w-full bg-transparent" asChild>
               <Link href="/orders/history">履歴を見る</Link>
             </Button>
@@ -250,22 +489,42 @@ export default function DashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-start gap-3 p-3 bg-destructive/10 rounded-lg">
-            <AlertTriangle className="w-5 h-5 text-destructive mt-0.5" />
-            <div>
-              <p className="font-medium text-destructive">在庫不足の商品があります</p>
-              <p className="text-sm text-muted-foreground">ゴム手袋（M）の在庫が1個まで減少しています。</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
-            <Calendar className="w-5 h-5 text-blue-600 mt-0.5" />
-            <div>
-              <p className="font-medium text-blue-900">次回在庫点検のお知らせ</p>
-              <p className="text-sm text-muted-foreground">
-                1月19日（金）09:00に在庫点検のリマインダーが送信されます。
-              </p>
-            </div>
-          </div>
+          {notifications.length === 0 ? (
+            <p className="text-muted-foreground text-center py-4">新しい通知はありません</p>
+          ) : (
+            notifications.map((notification, index) => (
+              <div
+                key={index}
+                className={`flex items-start gap-3 p-3 rounded-lg ${
+                  notification.type === 'warning'
+                    ? 'bg-destructive/10'
+                    : 'bg-blue-50'
+                }`}
+              >
+                <notification.icon
+                  className={`w-5 h-5 mt-0.5 ${
+                    notification.type === 'warning'
+                      ? 'text-destructive'
+                      : 'text-blue-600'
+                  }`}
+                />
+                <div>
+                  <p
+                    className={`font-medium ${
+                      notification.type === 'warning'
+                        ? 'text-destructive'
+                        : 'text-blue-900'
+                    }`}
+                  >
+                    {notification.title}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {notification.message}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
     </div>
