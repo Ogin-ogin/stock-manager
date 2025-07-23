@@ -17,8 +17,12 @@ export async function GET() {
             id: product.id,
             name: product.name,
             url: product.url,
-            defaultQty: Number(product.defaultOrderQty) || 0,
+            defaultOrderQty: Number(product.defaultOrderQty) || 0, // 元のフィールド名を維持
+            defaultQty: Number(product.defaultOrderQty) || 0, // 既存のコードとの互換性のため両方提供
             currentStock,
+            isActive: product.isActive,
+            createdAt: product.createdAt,
+            updatedAt: product.updatedAt,
           }
         })
     )
