@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Settings, Bell, FileText, Database, Save } from "lucide-react"
+import { Settings, Bell, FileText, Database, Save, ExternalLink, CheckCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 export default function SettingsPage() {
@@ -23,10 +23,11 @@ export default function SettingsPage() {
     exportTime: "10:00",
     systemName: "触媒研究室 消耗品注文管理システム",
     adminEmail: "admin@lab.example.com",
-    graphPastDays: 30, // 新しい設定項目: デフォルト30日
-    graphForecastDays: 7, // 新しい設定項目: デフォルト7日
+    graphPastDays: 30, // 過去の表示期間
+    graphForecastDays: 7, // 予測期間
   })
   const [loading, setLoading] = useState(true)
+  const [saveSuccess, setSaveSuccess] = useState(false)
 
   useEffect(() => {
     async function fetchSettings() {
@@ -51,6 +52,16 @@ export default function SettingsPage() {
     fetchSettings()
   }, [])
 
+  // 成功アニメーションのuseEffect
+  useEffect(() => {
+    if (saveSuccess) {
+      const timer = setTimeout(() => {
+        setSaveSuccess(false)
+      }, 3000) // 3秒後にフェードアウト
+      return () => clearTimeout(timer)
+    }
+  }, [saveSuccess])
+
   const handleSettingChange = (key: string, value: string | number) => {
     setSettings((prev) => ({ ...prev, [key]: value }))
   }
@@ -64,8 +75,8 @@ export default function SettingsPage() {
         reorderThresholdDays: Number(settings.reorderThresholdDays),
         reminderDay: Number(settings.reminderDay),
         exportDay: Number(settings.exportDay),
-        graphPastDays: Number(settings.graphPastDays), // 新しい設定項目も変換
-        graphForecastDays: Number(settings.graphForecastDays), // 新しい設定項目も変換
+        graphPastDays: Number(settings.graphPastDays),
+        graphForecastDays: Number(settings.graphForecastDays),
       }
 
       const response = await fetch("/api/settings", {
@@ -81,6 +92,8 @@ export default function SettingsPage() {
         throw new Error(errorData.error || "Failed to save settings")
       }
 
+      // 成功の視覚的フィードバック
+      setSaveSuccess(true)
       toast({
         title: "設定保存完了",
         description: "設定を保存しました。",
@@ -153,12 +166,24 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* 成功表示のオーバーレイ */}
+      {saveSuccess && (
+        <div className="fixed top-4 right-4 z-50 animate-in fade-in-0 duration-300">
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 shadow-lg">
+            <div className="flex items-center space-x-2">
+              <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
+              <span className="text-green-800 dark:text-green-200 font-medium">設定が保存されました</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">設定</h1>
           <p className="text-muted-foreground">システムの各種設定を管理します</p>
         </div>
-        <Button onClick={handleSave}>
+        <Button onClick={handleSave} className="relative">
           <Save className="w-4 h-4 mr-2" />
           設定を保存
         </Button>
@@ -380,33 +405,64 @@ export default function SettingsPage() {
 
         {/* System Settings */}
         <TabsContent value="system">
-          <Card>
-            <CardHeader>
-              <CardTitle>システム設定</CardTitle>
-              <CardDescription>システム全体の基本設定</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="system-name">システム名</Label>
-                <Input
-                  id="system-name"
-                  value={settings.systemName}
-                  onChange={(e) => handleSettingChange("systemName", e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="admin-email">管理者メールアドレス</Label>
-                <Input
-                  id="admin-email"
-                  type="email"
-                  value={settings.adminEmail}
-                  onChange={(e) => handleSettingChange("adminEmail", e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>システム設定</CardTitle>
+                <CardDescription>システム全体の基本設定</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="system-name">システム名</Label>
+                  <Input
+                    id="system-name"
+                    value={settings.systemName}
+                    onChange={(e) => handleSettingChange("systemName", e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="admin-email">管理者メールアドレス</Label>
+                  <Input
+                    id="admin-email"
+                    type="email"
+                    value={settings.adminEmail}
+                    onChange={(e) => handleSettingChange("adminEmail", e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>データベース設定</CardTitle>
+                <CardDescription>Google Spreadsheetのデータベースへのアクセス</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center space-x-2">
+                  <Button 
+                    variant="outline" 
+                    asChild
+                    className="flex items-center space-x-2"
+                  >
+                    <a 
+                      href="https://docs.google.com/spreadsheets/d/15dvbh5TLNiysenuAFHNBdRKrNUZozW2xk7iD1-qMnbc/edit?gid=174154368#gid=174154368"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Database className="w-4 h-4" />
+                      <span>スプレッドシートを開く</span>
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">
+                  システムのデータベースとして使用しているGoogle Spreadsheetに直接アクセスできます
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
