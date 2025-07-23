@@ -395,7 +395,7 @@ export default function SettingsPage() {
               </div>
               <div className="p-4 bg-muted/50 rounded-lg">
                 <p className="text-sm text-muted-foreground">
-                  現在の設定: 毎週{weekdays.find((d) => d.value === settings.exportDay)?.label} {settings.exportTime}
+                  現在の設定: 毎週{weekdays.find((d) => d.value === settings.exportDay.toString())?.label} {settings.exportTime}
                   に注文書を自動出力
                 </p>
               </div>

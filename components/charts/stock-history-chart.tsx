@@ -12,10 +12,18 @@ interface StockHistoryChartProps {
   productNames: string[]
   title?: string
   description?: string
-  pastDays: number // 過去データの期間を受け取る
+  graphPastDays: number // 過去データの表示期間
+  graphForecastDays: number // 予測データの表示期間
 }
 
-export function StockHistoryChart({ data, productNames, title, description, pastDays }: StockHistoryChartProps) {
+export function StockHistoryChart({ 
+  data, 
+  productNames, 
+  title, 
+  description, 
+  graphPastDays, 
+  graphForecastDays 
+}: StockHistoryChartProps) {
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -136,7 +144,9 @@ export function StockHistoryChart({ data, productNames, title, description, past
     <Card>
       <CardHeader>
         <CardTitle>{title || "在庫推移グラフ"}</CardTitle>
-        <CardDescription>{description || "過去の在庫数の変動と将来の予測を表示します"}</CardDescription>
+        <CardDescription>
+          {description || `過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を表示します`}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="h-[450px] md:h-[600px] w-full">
