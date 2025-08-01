@@ -37,13 +37,24 @@ class InventoryStatusEvaluator {
     pattern: ConsumptionPattern,
     safetyStock: number,
   ): {
-    remainingDays: number
-    adjustedRemainingDays: number
+    remainingDays: number | string
+    adjustedRemainingDays: number | string
     status: string
     riskLevel: number
     recommendation: string
   } {
     const { averageDailyConsumption, trendDirection, confidence } = pattern
+
+    // 消費量が0の場合は計算不可
+    if (averageDailyConsumption === 0) {
+      return {
+        remainingDays: "計算不可",
+        adjustedRemainingDays: "計算不可",
+        status: "unknown",
+        riskLevel: 0,
+        recommendation: "消費データが不足しています"
+      }
+    }
 
     // 基本残り日数
     const basicRemainingDays = Math.floor(currentStock / averageDailyConsumption)
@@ -118,16 +129,16 @@ export async function GET() {
             currentStock: 0,
             lastCheckDate: new Date().toISOString(),
             consumptionPattern: {
-              averageDailyConsumption: 0.1,
+              averageDailyConsumption: 0,
               consumptionVariability: 0,
               trendDirection: "stable",
               confidence: 0,
             },
             safetyStock: 0,
-            remainingDays: 0,
-            adjustedRemainingDays: 0,
-            status: "critical",
-            riskLevel: 1,
+            remainingDays: "計算不可",
+            adjustedRemainingDays: "計算不可",
+            status: "unknown",
+            riskLevel: 0,
             recommendation: "在庫データがありません",
           }
         }
@@ -139,8 +150,8 @@ export async function GET() {
         const analyzer = new ConsumptionAnalyzer(records, settings)
         const consumptionPattern = analyzer.analyze()
 
-        // 安全在庫計算
-        const safetyStock = SafetyStockCalculator.calculate(consumptionPattern)
+        // 安全在庫計算（消費量が0の場合は0に設定）
+        const safetyStock = consumptionPattern.averageDailyConsumption === 0 ? 0 : SafetyStockCalculator.calculate(consumptionPattern)
 
         // 在庫状態評価
         const evaluation = InventoryStatusEvaluator.evaluate(currentStock, consumptionPattern, safetyStock)

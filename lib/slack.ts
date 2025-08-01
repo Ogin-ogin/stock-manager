@@ -7,8 +7,8 @@ interface SlackMessage {
 interface LowStockItem {
   name: string
   stock: number
-  remainingDays: number
-  adjustedRemainingDays: number
+  remainingDays: number | string
+  adjustedRemainingDays: number | string
   status: string
   riskLevel: number
   recommendation: string

@@ -138,19 +138,19 @@ export class ConsumptionAnalyzer {
   analyze(): ConsumptionPattern {
     if (this.records.length < 2) {
       return {
-        averageDailyConsumption: 0.1, // データ不足時のデフォルト
+        averageDailyConsumption: 0, // データ不足時は0に変更
         consumptionVariability: 0,
         trendDirection: "stable",
         confidence: 0,
       }
     }
     const movingAverages = this.calculateMovingAverage()
-    const averageDailyConsumption = movingAverages.length > 0 ? movingAverages[movingAverages.length - 1] : 0.1 // 最新の移動平均
+    const averageDailyConsumption = movingAverages.length > 0 ? movingAverages[movingAverages.length - 1] : 0 // 最新の移動平均、デフォルトは0
     const trend = this.analyzeTrend()
     const variability = this.calculateVariability()
     const confidence = this.calculateConfidence()
     return {
-      averageDailyConsumption: Math.max(0.05, averageDailyConsumption), // 0以下にならないように
+      averageDailyConsumption: Math.max(0, averageDailyConsumption), // 0以下にならないように、最低値は0
       consumptionVariability: variability,
       trendDirection: trend.direction,
       confidence,

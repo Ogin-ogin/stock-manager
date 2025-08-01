@@ -28,13 +28,24 @@ class InventoryStatusEvaluator {
     pattern: ConsumptionPattern,
     safetyStock: number,
   ): {
-    remainingDays: number
-    adjustedRemainingDays: number
+    remainingDays: number | string
+    adjustedRemainingDays: number | string
     status: string
     riskLevel: number
     recommendation: string
   } {
     const { averageDailyConsumption, trendDirection, confidence } = pattern
+
+    // 消費量が0の場合は計算不可
+    if (averageDailyConsumption === 0) {
+      return {
+        remainingDays: "計算不可",
+        adjustedRemainingDays: "計算不可",
+        status: "unknown",
+        riskLevel: 0,
+        recommendation: "消費データが不足しています"
+      }
+    }
 
     // 基本残り日数
     const basicRemainingDays = Math.floor(currentStock / averageDailyConsumption)
@@ -94,8 +105,8 @@ interface InventoryItem {
 interface LowStockItem {
   name: string
   stock: number
-  remainingDays: number
-  adjustedRemainingDays: number
+  remainingDays: number | string
+  adjustedRemainingDays: number | string
   status: string
   riskLevel: number
   recommendation: string
@@ -164,8 +175,8 @@ export async function POST(request: NextRequest) {
         const analyzer = new ConsumptionAnalyzer(historicalRecords, settings)
         const consumptionPattern = analyzer.analyze()
 
-        // 安全在庫計算
-        const safetyStock = SafetyStockCalculator.calculate(consumptionPattern)
+        // 安全在庫計算（消費量が0の場合は0に設定）
+        const safetyStock = consumptionPattern.averageDailyConsumption === 0 ? 0 : SafetyStockCalculator.calculate(consumptionPattern)
 
         // 在庫状態評価
         const evaluation = InventoryStatusEvaluator.evaluate(
@@ -181,8 +192,9 @@ export async function POST(request: NextRequest) {
           threshold: thresholdDays
         })
 
-        // 閾値を下回った場合の処理
-        if (evaluation.adjustedRemainingDays <= thresholdDays || evaluation.status === "critical") {
+        // 閾値を下回った場合の処理（計算不可の場合は除外）
+        if (evaluation.adjustedRemainingDays !== "計算不可" && 
+            (evaluation.adjustedRemainingDays <= thresholdDays || evaluation.status === "critical")) {
           const lowStockItem: LowStockItem = {
             name: product.name,
             stock: item.stockCount,
