@@ -51,6 +51,18 @@ export function StockHistoryChart({
 
   const textColor = theme === "dark" ? "#A1A1AA" : "#71717A" // muted-foreground
 
+  // 各商品の直近の極大値を計算
+  const maxValues: { [key: string]: number } = {}
+  productNames.forEach(name => {
+    let maxValue = 0
+    data.forEach(item => {
+      if (item[name] != null && item[name] > maxValue) {
+        maxValue = item[name]
+      }
+    })
+    maxValues[name] = maxValue || 1 // 0で割ることを防ぐため、最小値を1に設定
+  })
+
   // 過去データと予測データを分けるためのインデックスを計算
   const today = new Date().toISOString().split("T")[0]
   let lastPastDataIndex = -1
@@ -62,19 +74,25 @@ export function StockHistoryChart({
     }
   }
 
-  // データを処理して過去データと予測データを分ける
+  // データを処理して過去データと予測データを分け、割合に変換
   const processedData = data.map((item, index) => {
     const newItem: any = { date: item.date }
     
     productNames.forEach(name => {
+      const percentage = item[name] != null ? (item[name] / maxValues[name]) * 100 : null
+      
       if (index <= lastPastDataIndex) {
         // 過去データ：実線用
-        newItem[name] = item[name]
+        newItem[name] = percentage
         newItem[`${name}_forecast`] = null
+        // 元の値も保持（ツールチップ表示用）
+        newItem[`${name}_original`] = item[name]
       } else {
         // 予測データ：破線用
         newItem[name] = null
-        newItem[`${name}_forecast`] = item[name]
+        newItem[`${name}_forecast`] = percentage
+        // 元の値も保持（ツールチップ表示用）
+        newItem[`${name}_original`] = item[name]
       }
     })
     
@@ -94,7 +112,7 @@ export function StockHistoryChart({
   // カスタムツールチップコンポーネント
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
-      const displayedItems: { name: string; value: number; color: string; isForecast: boolean }[] = []
+      const displayedItems: { name: string; percentage: number; originalValue: number; color: string; isForecast: boolean }[] = []
       const seenProducts = new Set<string>()
 
       // 現在の日付が過去データの最終日より後かどうかで予測データかを判定
@@ -109,9 +127,14 @@ export function StockHistoryChart({
 
           // 同じ商品名が既に処理されていない場合のみ追加
           if (!seenProducts.has(productName)) {
+            // 元の値を取得
+            const originalKey = `${productName}_original`
+            const originalValue = item.payload[originalKey] || 0
+
             displayedItems.push({
               name: productName,
-              value: item.value,
+              percentage: item.value,
+              originalValue: originalValue,
               color: item.color,
               isForecast: isForecast || isForecastLine,
             })
@@ -119,6 +142,9 @@ export function StockHistoryChart({
           }
         }
       })
+
+      // 割合の高い順にソート
+      displayedItems.sort((a, b) => b.percentage - a.percentage)
 
       return (
         <div
@@ -131,7 +157,7 @@ export function StockHistoryChart({
           <p className="text-sm font-bold" style={{ color: textColor }}>{`日付: ${label}`}</p>
           {displayedItems.map((item, index) => (
             <p key={index} className="text-sm" style={{ color: item.color }}>
-              {`${item.name}${item.isForecast ? " (予測)" : ""}: ${item.value}`}
+              {`${item.name}${item.isForecast ? " (予測)" : ""}: ${item.percentage.toFixed(1)}% (${item.originalValue}個)`}
             </p>
           ))}
         </div>
@@ -143,9 +169,9 @@ export function StockHistoryChart({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{title || "在庫推移グラフ"}</CardTitle>
+        <CardTitle>{title || "在庫推移グラフ（割合表示）"}</CardTitle>
         <CardDescription>
-          {description || `過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を表示します`}
+          {description || `過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を直近の極大値を100%とした割合で表示します`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -169,6 +195,8 @@ export function StockHistoryChart({
               <YAxis 
                 stroke={textColor}
                 fontSize={16}
+                domain={[0, 100]}
+                tickFormatter={(value) => `${value}%`}
               />
               <Tooltip content={<CustomTooltip />} />
               <Legend 
