@@ -107,7 +107,7 @@ export default function DashboardPage() {
             currentStock: item.currentStock || 0,
             minThreshold: item.minThreshold || 0,
             maxThreshold: item.maxThreshold || 0,
-            lastChecked: item.lastChecked || new Date().toISOString().split('T')[0],
+            lastChecked: item.lastCheckDate || new Date().toISOString().split('T')[0],
             status
           }
         })
@@ -154,7 +154,7 @@ export default function DashboardPage() {
         let lastInspectionDate = '点検記録なし'
         if (inventoryData.length > 0) {
           const latestCheckDate = inventoryData.reduce((latest: string, item: any) => {
-            const itemDate = item.lastChecked || ''
+            const itemDate = item.lastCheckDate || ''
             return itemDate > latest ? itemDate : latest
           }, '')
 
