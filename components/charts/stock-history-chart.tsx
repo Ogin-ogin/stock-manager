@@ -51,16 +51,38 @@ export function StockHistoryChart({
 
   const textColor = theme === "dark" ? "#A1A1AA" : "#71717A" // muted-foreground
 
-  // 各商品の直近の極大値を計算
-  const maxValues: { [key: string]: number } = {}
+  // 各商品の直近の補充時（在庫が増加した時点）の在庫数を基準値とする
+  const baseValues: { [key: string]: number } = {}
   productNames.forEach(name => {
-    let maxValue = 0
-    data.forEach(item => {
-      if (item[name] != null && item[name] > maxValue) {
-        maxValue = item[name]
+    let baseValue = 0
+    let lastStock: number | null = null
+
+    // 過去データのみを見る（予測データは除外）
+    // lastPastDataIndexが-1の場合は全データを過去データとして扱う
+    const endIndex = lastPastDataIndex >= 0 ? lastPastDataIndex : data.length - 1
+
+    for (let i = 0; i <= endIndex && i < data.length; i++) {
+      const currentStock = data[i][name]
+      if (currentStock != null) {
+        // 在庫が増加した時点を検出（補充があった）
+        if (lastStock !== null && currentStock > lastStock) {
+          baseValue = currentStock
+        }
+        lastStock = currentStock
       }
-    })
-    maxValues[name] = maxValue || 1 // 0で割ることを防ぐため、最小値を1に設定
+    }
+
+    // 補充が一度もない場合は、最初の在庫数を基準とする
+    if (baseValue === 0) {
+      for (let i = 0; i <= endIndex && i < data.length; i++) {
+        if (data[i][name] != null) {
+          baseValue = data[i][name]
+          break
+        }
+      }
+    }
+
+    baseValues[name] = baseValue || 1 // 0で割ることを防ぐため、最小値を1に設定
   })
 
   // 過去データと予測データを分けるためのインデックスを計算
@@ -79,7 +101,7 @@ export function StockHistoryChart({
     const newItem: any = { date: item.date }
     
     productNames.forEach(name => {
-      const percentage = item[name] != null ? (item[name] / maxValues[name]) * 100 : null
+      const percentage = item[name] != null ? (item[name] / baseValues[name]) * 100 : null
       
       if (index <= lastPastDataIndex) {
         // 過去データ：実線用
@@ -171,7 +193,7 @@ export function StockHistoryChart({
       <CardHeader>
         <CardTitle>{title || "在庫推移グラフ（割合表示）"}</CardTitle>
         <CardDescription>
-          {description || `過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を直近の極大値を100%とした割合で表示します`}
+          {description || `過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を直近の補充時の在庫数を100%とした割合で表示します`}
         </CardDescription>
       </CardHeader>
       <CardContent>

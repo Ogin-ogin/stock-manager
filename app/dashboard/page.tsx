@@ -23,8 +23,8 @@ interface Order {
   productName: string
   quantity: number
   orderType: 'auto' | 'manual'
-  createdAt: string
-  status: string
+  orderDate: string
+  isExported: boolean
 }
 
 interface DashboardStats {
@@ -32,7 +32,7 @@ interface DashboardStats {
   productsNeedingOrder: number
   ordersThisMonth: number
   ordersGrowthPercent: number
-  nextInspectionDate: string
+  lastInspectionDate: string
 }
 
 export default function DashboardPage() {
@@ -43,7 +43,7 @@ export default function DashboardPage() {
     productsNeedingOrder: 0,
     ordersThisMonth: 0,
     ordersGrowthPercent: 0,
-    nextInspectionDate: ''
+    lastInspectionDate: ''
   })
   const [notifications, setNotifications] = useState<Array<{
     type: 'warning' | 'info'
@@ -118,10 +118,10 @@ export default function DashboardPage() {
           productName: order.product?.name || "不明な商品",
           quantity: parseInt(order.orderQty, 10) || 0,
           orderType: order.orderType === "AUTO" ? "auto" : "manual",
-          createdAt: order.orderDate
+          orderDate: order.orderDate
             ? new Date(order.orderDate).toISOString().split("T")[0]
             : new Date().toISOString().split("T")[0],
-          status: "completed"
+          isExported: order.isExported === true || order.isExported === "true"
         }))
 
         // 統計データを計算
@@ -134,7 +134,7 @@ export default function DashboardPage() {
         const currentMonth = new Date().getMonth()
         const currentYear = new Date().getFullYear()
         const ordersThisMonth = ordersData.filter((order: any) => {
-          const orderDate = new Date(order.createdAt)
+          const orderDate = new Date(order.orderDate)
           return orderDate.getMonth() === currentMonth && orderDate.getFullYear() === currentYear
         }).length
 
@@ -142,22 +142,31 @@ export default function DashboardPage() {
         const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1
         const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear
         const ordersLastMonth = ordersData.filter((order: any) => {
-          const orderDate = new Date(order.createdAt)
+          const orderDate = new Date(order.orderDate)
           return orderDate.getMonth() === lastMonth && orderDate.getFullYear() === lastMonthYear
         }).length
 
-        const ordersGrowthPercent = ordersLastMonth > 0 
+        const ordersGrowthPercent = ordersLastMonth > 0
           ? Math.round(((ordersThisMonth - ordersLastMonth) / ordersLastMonth) * 100)
           : 0
 
-        // 次回点検日を計算（設定があれば使用、なければ来週の金曜日）
-        const nextFriday = new Date()
-        nextFriday.setDate(nextFriday.getDate() + (5 - nextFriday.getDay() + 7) % 7)
-        const nextInspectionDate = nextFriday.toLocaleDateString('ja-JP', {
-          weekday: 'long',
-          month: 'long',
-          day: 'numeric'
-        })
+        // 前回点検日を取得（在庫データから最新の点検日を取得）
+        let lastInspectionDate = '点検記録なし'
+        if (inventoryData.length > 0) {
+          const latestCheckDate = inventoryData.reduce((latest: string, item: any) => {
+            const itemDate = item.lastChecked || ''
+            return itemDate > latest ? itemDate : latest
+          }, '')
+
+          if (latestCheckDate) {
+            const date = new Date(latestCheckDate)
+            lastInspectionDate = date.toLocaleDateString('ja-JP', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })
+          }
+        }
 
         setInventoryStatus(processedInventory.slice(0, 4)) // 上位4つのみ表示
         setRecentOrders(processedOrders)
@@ -166,7 +175,7 @@ export default function DashboardPage() {
           productsNeedingOrder,
           ordersThisMonth,
           ordersGrowthPercent,
-          nextInspectionDate
+          lastInspectionDate
         })
         setSettings(settingsData)
 
@@ -182,12 +191,14 @@ export default function DashboardPage() {
           })
         }
 
-        newNotifications.push({
-          type: 'info' as const,
-          title: '次回在庫点検のお知らせ',
-          message: `${nextInspectionDate}に在庫点検のリマインダーが送信されます。`,
-          icon: Calendar
-        })
+        if (lastInspectionDate !== '点検記録なし') {
+          newNotifications.push({
+            type: 'info' as const,
+            title: '前回在庫点検',
+            message: `最終点検日: ${lastInspectionDate}`,
+            icon: Calendar
+          })
+        }
 
         setNotifications(newNotifications)
 
@@ -367,14 +378,16 @@ export default function DashboardPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">次回点検</CardTitle>
+            <CardTitle className="text-sm font-medium">前回点検</CardTitle>
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {dashboardStats.nextInspectionDate.split('日')[0] + '日'}
+              {dashboardStats.lastInspectionDate === '点検記録なし'
+                ? '未実施'
+                : dashboardStats.lastInspectionDate.split('年')[1]?.split('月')[0] + '/' + dashboardStats.lastInspectionDate.split('月')[1]?.split('日')[0]}
             </div>
-            <p className="text-xs text-muted-foreground">09:00予定</p>
+            <p className="text-xs text-muted-foreground">最終点検日</p>
           </CardContent>
         </Card>
       </div>
@@ -404,10 +417,11 @@ export default function DashboardPage() {
         ) : (
           <StockHistoryChart
             title="主要商品の在庫推移と予測"
-            description={`過去${settings.graphPastDays}日間と将来${settings.graphForecastDays}日間の在庫数の変動`}
+            description={`過去${settings.graphPastDays}日間と将来${settings.graphForecastDays}日間の在庫数の変動（直近の補充時を100%として表示）`}
             data={graphData}
             productNames={productNamesForGraph}
-            pastDays={settings.graphPastDays}
+            graphPastDays={settings.graphPastDays}
+            graphForecastDays={settings.graphForecastDays}
           />
         )}
       </div>
@@ -464,7 +478,7 @@ export default function DashboardPage() {
                 <div key={order.id} className="flex items-center justify-between">
                   <div className="flex-1">
                     <p className="font-medium">{order.productName}</p>
-                    <p className="text-sm text-muted-foreground">{order.createdAt}</p>
+                    <p className="text-sm text-muted-foreground">{order.orderDate}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold">{order.quantity}個</span>
