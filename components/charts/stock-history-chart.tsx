@@ -51,6 +51,17 @@ export function StockHistoryChart({
 
   const textColor = theme === "dark" ? "#A1A1AA" : "#71717A" // muted-foreground
 
+  // 過去データと予測データを分けるためのインデックスを計算
+  const today = new Date().toISOString().split("T")[0]
+  let lastPastDataIndex = -1
+  for (let i = 0; i < data.length; i++) {
+    if (new Date(data[i].date).toISOString().split("T")[0] <= today) {
+      lastPastDataIndex = i
+    } else {
+      break
+    }
+  }
+
   // 各商品の直近の補充時（在庫が増加した時点）の在庫数を基準値とする
   const baseValues: { [key: string]: number } = {}
   productNames.forEach(name => {
@@ -84,17 +95,6 @@ export function StockHistoryChart({
 
     baseValues[name] = baseValue || 1 // 0で割ることを防ぐため、最小値を1に設定
   })
-
-  // 過去データと予測データを分けるためのインデックスを計算
-  const today = new Date().toISOString().split("T")[0]
-  let lastPastDataIndex = -1
-  for (let i = 0; i < data.length; i++) {
-    if (new Date(data[i].date).toISOString().split("T")[0] <= today) {
-      lastPastDataIndex = i
-    } else {
-      break
-    }
-  }
 
   // データを処理して過去データと予測データを分け、割合に変換
   const processedData = data.map((item, index) => {
