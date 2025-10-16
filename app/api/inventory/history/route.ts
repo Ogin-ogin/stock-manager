@@ -127,23 +127,16 @@ export async function GET(request: NextRequest) {
     // 過去データと予測データを結合
     const combinedData = [...interpolatedData, ...forecastData]
 
-    // グラフ表示点を最大10点に制限するロジック
-    const MAX_DATA_POINTS = 10
-    let finalData = combinedData
-
-    if (combinedData.length > MAX_DATA_POINTS) {
-      const step = Math.ceil(combinedData.length / MAX_DATA_POINTS)
-      finalData = []
-      for (let i = 0; i < combinedData.length; i += step) {
-        finalData.push(combinedData[i])
-      }
-      // 最後のデータポイントがスキップされるのを防ぐ
-      if (finalData[finalData.length - 1] !== combinedData[combinedData.length - 1]) {
-        finalData.push(combinedData[combinedData.length - 1])
-      }
+    // 実際に在庫記録がある日付を抽出（点検日）
+    const actualCheckDates = new Set<string>()
+    for (const record of sortedRecords) {
+      const dateString = new Date(record.checkDate).toISOString().split("T")[0]
+      actualCheckDates.add(dateString)
     }
 
-    return NextResponse.json(finalData)
+    // 全データを返す（間引きなし）
+    // 実際の点検日のデータは必ず含まれる
+    return NextResponse.json(combinedData)
   } catch (error) {
     console.error("Failed to fetch inventory history:", error)
     return NextResponse.json({ error: "Failed to fetch inventory history" }, { status: 500 })
