@@ -16,19 +16,30 @@ interface StockHistoryChartProps {
   graphForecastDays: number // 予測データの表示期間
 }
 
-export function StockHistoryChart({ 
-  data, 
-  productNames, 
-  title, 
-  description, 
-  graphPastDays, 
-  graphForecastDays 
+export function StockHistoryChart({
+  data,
+  productNames,
+  title,
+  description,
+  graphPastDays,
+  graphForecastDays
 }: StockHistoryChartProps) {
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     setMounted(true)
+
+    // モバイル判定
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+
+    return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
   if (!mounted) {
@@ -63,16 +74,14 @@ export function StockHistoryChart({
   }
 
   // 各商品の直近の補充時（在庫が増加した時点）の在庫数を基準値とする
+  // 表示期間に関わらず、全データから最後の補充時を探す
   const baseValues: { [key: string]: number } = {}
   productNames.forEach(name => {
     let baseValue = 0
     let lastStock: number | null = null
 
-    // 過去データのみを見る（予測データは除外）
-    // lastPastDataIndexが-1の場合は全データを過去データとして扱う
-    const endIndex = lastPastDataIndex >= 0 ? lastPastDataIndex : data.length - 1
-
-    for (let i = 0; i <= endIndex && i < data.length; i++) {
+    // 全データを見て、最後の補充時（在庫増加時）を探す
+    for (let i = 0; i < data.length; i++) {
       const currentStock = data[i][name]
       if (currentStock != null) {
         // 在庫が増加した時点を検出（補充があった）
@@ -85,7 +94,7 @@ export function StockHistoryChart({
 
     // 補充が一度もない場合は、最初の在庫数を基準とする
     if (baseValue === 0) {
-      for (let i = 0; i <= endIndex && i < data.length; i++) {
+      for (let i = 0; i < data.length; i++) {
         if (data[i][name] != null) {
           baseValue = data[i][name]
           break
@@ -197,15 +206,15 @@ export function StockHistoryChart({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="h-[450px] md:h-[600px] w-full">
+        <div className="h-[500px] md:h-[600px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={processedData}
               margin={{
                 top: 5,
-                right: 30,
-                left: 20,
-                bottom: 20, // 凡例用に下部マージンをさらに増加
+                right: isMobile ? 10 : 30,
+                left: isMobile ? 0 : 20,
+                bottom: isMobile ? 5 : 20,
               }}
             >
               <XAxis 
@@ -221,13 +230,15 @@ export function StockHistoryChart({
                 tickFormatter={(value) => `${value}%`}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend 
+              <Legend
                 wrapperStyle={{
-                  paddingTop: '80px',
-                  fontSize: '16px'
+                  paddingTop: isMobile ? '10px' : '20px',
+                  fontSize: isMobile ? '11px' : '14px',
+                  maxHeight: isMobile ? '120px' : 'auto',
+                  overflow: isMobile ? 'auto' : 'visible'
                 }}
                 iconType="line"
-                layout="horizontal"
+                layout={isMobile ? "vertical" : "horizontal"}
                 align="center"
                 verticalAlign="bottom"
               />
