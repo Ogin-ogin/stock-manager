@@ -61,32 +61,27 @@ export function StockHistoryChart({
   ]
 
   const textColor = theme === "dark" ? "#A1A1AA" : "#71717A" // muted-foreground
-
-  // 過去データと予測データを分けるためのインデックスを計算
   const today = new Date().toISOString().split("T")[0]
-  let lastPastDataIndex = -1
-  for (let i = 0; i < data.length; i++) {
-    if (new Date(data[i].date).toISOString().split("T")[0] <= today) {
-      lastPastDataIndex = i
-    } else {
-      break
-    }
-  }
 
-  // 各商品の直近の補充時（在庫が増加した時点）の在庫数を基準値とする
-  // 表示期間に関わらず、全データから最後の補充時を探す
+  // 各商品の初めての補充時（在庫が増加した時点）の在庫数を基準値（100%）とする
+  // データを古い順に見て、初めて在庫が増えた時点を探す
   const baseValues: { [key: string]: number } = {}
+  const firstReplenishmentIndices: { [key: string]: number } = {}
+
   productNames.forEach(name => {
     let baseValue = 0
     let lastStock: number | null = null
+    let firstReplenishmentIndex = -1
 
-    // 全データを見て、最後の補充時（在庫増加時）を探す
+    // データを古い順に見て、初めて在庫が増加した時点を探す
     for (let i = 0; i < data.length; i++) {
       const currentStock = data[i][name]
       if (currentStock != null) {
-        // 在庫が増加した時点を検出（補充があった）
+        // 在庫が増加した時点を検出（初めての補充）
         if (lastStock !== null && currentStock > lastStock) {
           baseValue = currentStock
+          firstReplenishmentIndex = i
+          break // 初めての補充時点で終了
         }
         lastStock = currentStock
       }
@@ -97,22 +92,44 @@ export function StockHistoryChart({
       for (let i = 0; i < data.length; i++) {
         if (data[i][name] != null) {
           baseValue = data[i][name]
+          firstReplenishmentIndex = i
           break
         }
       }
     }
 
     baseValues[name] = baseValue || 1 // 0で割ることを防ぐため、最小値を1に設定
+    firstReplenishmentIndices[name] = firstReplenishmentIndex
   })
 
+  // 全商品の中で最も早い補充時点を基準にする
+  const earliestReplenishmentIndex = Math.min(
+    ...Object.values(firstReplenishmentIndices).filter(idx => idx >= 0)
+  )
+
+  // 補充時点からのデータのみを使用
+  const dataFromReplenishment = earliestReplenishmentIndex >= 0
+    ? data.slice(earliestReplenishmentIndex)
+    : data
+
+  // 補充時点からのデータで過去データと予測データの境界を再計算
+  let lastPastDataIndexFromReplenishment = -1
+  for (let i = 0; i < dataFromReplenishment.length; i++) {
+    if (new Date(dataFromReplenishment[i].date).toISOString().split("T")[0] <= today) {
+      lastPastDataIndexFromReplenishment = i
+    } else {
+      break
+    }
+  }
+
   // データを処理して過去データと予測データを分け、割合に変換
-  const processedData = data.map((item, index) => {
+  const processedData = dataFromReplenishment.map((item, index) => {
     const newItem: any = { date: item.date }
-    
+
     productNames.forEach(name => {
       const percentage = item[name] != null ? (item[name] / baseValues[name]) * 100 : null
-      
-      if (index <= lastPastDataIndex) {
+
+      if (index <= lastPastDataIndexFromReplenishment) {
         // 過去データ：実線用
         newItem[name] = percentage
         newItem[`${name}_forecast`] = null
@@ -126,13 +143,13 @@ export function StockHistoryChart({
         newItem[`${name}_original`] = item[name]
       }
     })
-    
+
     return newItem
   })
 
   // 境界点で接続するために、最後の過去データポイントを予測データにも含める
-  if (lastPastDataIndex >= 0 && lastPastDataIndex < data.length - 1) {
-    const boundaryItem = processedData[lastPastDataIndex]
+  if (lastPastDataIndexFromReplenishment >= 0 && lastPastDataIndexFromReplenishment < dataFromReplenishment.length - 1) {
+    const boundaryItem = processedData[lastPastDataIndexFromReplenishment]
     productNames.forEach(name => {
       if (boundaryItem[name] != null) {
         boundaryItem[`${name}_forecast`] = boundaryItem[name]
@@ -147,7 +164,9 @@ export function StockHistoryChart({
       const seenProducts = new Set<string>()
 
       // 現在の日付が過去データの最終日より後かどうかで予測データかを判定
-      const lastHistoricalDate = lastPastDataIndex !== -1 ? new Date(data[lastPastDataIndex].date) : null
+      const lastHistoricalDate = lastPastDataIndexFromReplenishment !== -1
+        ? new Date(dataFromReplenishment[lastPastDataIndexFromReplenishment].date)
+        : null
       const currentDate = new Date(label)
       const isForecast = lastHistoricalDate && currentDate > lastHistoricalDate
 
@@ -202,7 +221,7 @@ export function StockHistoryChart({
       <CardHeader>
         <CardTitle>{title || "在庫推移グラフ（割合表示）"}</CardTitle>
         <CardDescription>
-          {description || `過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を直近の補充時の在庫数を100%とした割合で表示します`}
+          {description || `初めての補充時の在庫数を100%として、過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を割合で表示します`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -212,9 +231,9 @@ export function StockHistoryChart({
               data={processedData}
               margin={{
                 top: 5,
-                right: isMobile ? 10 : 30,
+                right: isMobile ? 5 : 30,
                 left: isMobile ? 0 : 20,
-                bottom: isMobile ? 5 : 20,
+                bottom: isMobile ? 25 : 20,
               }}
             >
               <XAxis 
@@ -230,18 +249,18 @@ export function StockHistoryChart({
                 tickFormatter={(value) => `${value}%`}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend
-                wrapperStyle={{
-                  paddingTop: isMobile ? '10px' : '20px',
-                  fontSize: isMobile ? '11px' : '14px',
-                  maxHeight: isMobile ? '120px' : 'auto',
-                  overflow: isMobile ? 'auto' : 'visible'
-                }}
-                iconType="line"
-                layout={isMobile ? "vertical" : "horizontal"}
-                align="center"
-                verticalAlign="bottom"
-              />
+              {!isMobile && (
+                <Legend
+                  wrapperStyle={{
+                    paddingTop: '20px',
+                    fontSize: '14px'
+                  }}
+                  iconType="line"
+                  layout="horizontal"
+                  align="center"
+                  verticalAlign="bottom"
+                />
+              )}
               {productNames.map((name, index) => (
                 <React.Fragment key={name}>
                   {/* 過去データ用のLine（実線） */}
