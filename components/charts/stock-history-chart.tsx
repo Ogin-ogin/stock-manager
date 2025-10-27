@@ -63,73 +63,59 @@ export function StockHistoryChart({
   const textColor = theme === "dark" ? "#A1A1AA" : "#71717A" // muted-foreground
   const today = new Date().toISOString().split("T")[0]
 
-  // 各商品の初めての補充時（在庫が増加した時点）の在庫数を基準値（100%）とする
-  // データを古い順に見て、初めて在庫が増えた時点を探す
+  // 各商品の直近の補充時（在庫が増加した時点）の在庫数を基準値（100%）とする
+  // データを新しい順（逆順）に見て、直近で在庫が増えた時点を商品ごとに探す
   const baseValues: { [key: string]: number } = {}
-  const firstReplenishmentIndices: { [key: string]: number } = {}
 
   productNames.forEach(name => {
     let baseValue = 0
-    let lastStock: number | null = null
-    let firstReplenishmentIndex = -1
+    let nextStock: number | null = null
 
-    // データを古い順に見て、初めて在庫が増加した時点を探す
-    for (let i = 0; i < data.length; i++) {
+    // データを新しい順（逆順）に見て、直近の在庫増加時点を探す
+    for (let i = data.length - 1; i >= 0; i--) {
       const currentStock = data[i][name]
       if (currentStock != null) {
-        // 在庫が増加した時点を検出（初めての補充）
-        if (lastStock !== null && currentStock > lastStock) {
-          baseValue = currentStock
-          firstReplenishmentIndex = i
-          break // 初めての補充時点で終了
+        // 次のデータ（時系列的には後）と比較して在庫が増加した時点を検出
+        if (nextStock !== null && nextStock > currentStock) {
+          // nextStockの方が多い = currentからnextへ在庫が増加した = nextStockを100%とする
+          baseValue = nextStock
+          break // 直近の補充時点で終了
         }
-        lastStock = currentStock
+        nextStock = currentStock
       }
     }
 
-    // 補充が一度もない場合は、最初の在庫数を基準とする
+    // 補充が一度もない場合は、最新の在庫数を基準とする
     if (baseValue === 0) {
-      for (let i = 0; i < data.length; i++) {
+      for (let i = data.length - 1; i >= 0; i--) {
         if (data[i][name] != null) {
           baseValue = data[i][name]
-          firstReplenishmentIndex = i
           break
         }
       }
     }
 
     baseValues[name] = baseValue || 1 // 0で割ることを防ぐため、最小値を1に設定
-    firstReplenishmentIndices[name] = firstReplenishmentIndex
   })
 
-  // 全商品の中で最も早い補充時点を基準にする
-  const earliestReplenishmentIndex = Math.min(
-    ...Object.values(firstReplenishmentIndices).filter(idx => idx >= 0)
-  )
-
-  // 補充時点からのデータのみを使用
-  const dataFromReplenishment = earliestReplenishmentIndex >= 0
-    ? data.slice(earliestReplenishmentIndex)
-    : data
-
-  // 補充時点からのデータで過去データと予測データの境界を再計算
-  let lastPastDataIndexFromReplenishment = -1
-  for (let i = 0; i < dataFromReplenishment.length; i++) {
-    if (new Date(dataFromReplenishment[i].date).toISOString().split("T")[0] <= today) {
-      lastPastDataIndexFromReplenishment = i
+  // 過去データと予測データの境界を計算
+  let lastPastDataIndex = -1
+  for (let i = 0; i < data.length; i++) {
+    if (new Date(data[i].date).toISOString().split("T")[0] <= today) {
+      lastPastDataIndex = i
     } else {
       break
     }
   }
 
   // データを処理して過去データと予測データを分け、割合に変換
-  const processedData = dataFromReplenishment.map((item, index) => {
+  const processedData = data.map((item, index) => {
     const newItem: any = { date: item.date }
 
     productNames.forEach(name => {
       const percentage = item[name] != null ? (item[name] / baseValues[name]) * 100 : null
 
-      if (index <= lastPastDataIndexFromReplenishment) {
+      if (index <= lastPastDataIndex) {
         // 過去データ：実線用
         newItem[name] = percentage
         newItem[`${name}_forecast`] = null
@@ -148,8 +134,8 @@ export function StockHistoryChart({
   })
 
   // 境界点で接続するために、最後の過去データポイントを予測データにも含める
-  if (lastPastDataIndexFromReplenishment >= 0 && lastPastDataIndexFromReplenishment < dataFromReplenishment.length - 1) {
-    const boundaryItem = processedData[lastPastDataIndexFromReplenishment]
+  if (lastPastDataIndex >= 0 && lastPastDataIndex < data.length - 1) {
+    const boundaryItem = processedData[lastPastDataIndex]
     productNames.forEach(name => {
       if (boundaryItem[name] != null) {
         boundaryItem[`${name}_forecast`] = boundaryItem[name]
@@ -164,8 +150,8 @@ export function StockHistoryChart({
       const seenProducts = new Set<string>()
 
       // 現在の日付が過去データの最終日より後かどうかで予測データかを判定
-      const lastHistoricalDate = lastPastDataIndexFromReplenishment !== -1
-        ? new Date(dataFromReplenishment[lastPastDataIndexFromReplenishment].date)
+      const lastHistoricalDate = lastPastDataIndex !== -1
+        ? new Date(data[lastPastDataIndex].date)
         : null
       const currentDate = new Date(label)
       const isForecast = lastHistoricalDate && currentDate > lastHistoricalDate
@@ -221,7 +207,7 @@ export function StockHistoryChart({
       <CardHeader>
         <CardTitle>{title || "在庫推移グラフ（割合表示）"}</CardTitle>
         <CardDescription>
-          {description || `初めての補充時の在庫数を100%として、過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を割合で表示します`}
+          {description || `直近の補充時の在庫数を100%として、過去${graphPastDays}日間の在庫数の変動と将来${graphForecastDays}日間の予測を割合で表示します`}
         </CardDescription>
       </CardHeader>
       <CardContent>
