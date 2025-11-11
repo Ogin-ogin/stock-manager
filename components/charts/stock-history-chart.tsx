@@ -63,16 +63,27 @@ export function StockHistoryChart({
   const textColor = theme === "dark" ? "#A1A1AA" : "#71717A" // muted-foreground
   const today = new Date().toISOString().split("T")[0]
 
+  // 過去データと予測データの境界を計算（先に計算する必要がある）
+  let lastPastDataIndex = -1
+  for (let i = 0; i < data.length; i++) {
+    if (new Date(data[i].date).toISOString().split("T")[0] <= today) {
+      lastPastDataIndex = i
+    } else {
+      break
+    }
+  }
+
   // 各商品の直近の補充時（在庫が増加した時点）の在庫数を基準値（100%）とする
-  // データを新しい順（逆順）に見て、直近で在庫が増えた時点を商品ごとに探す
+  // 過去データのみを新しい順（逆順）に見て、直近で在庫が増えた時点を商品ごとに探す
   const baseValues: { [key: string]: number } = {}
 
   productNames.forEach(name => {
     let baseValue = 0
     let nextStock: number | null = null
 
-    // データを新しい順（逆順）に見て、直近の在庫増加時点を探す
-    for (let i = data.length - 1; i >= 0; i--) {
+    // 過去データのみを新しい順（逆順）に見て、直近の在庫増加時点を探す
+    const endIndex = lastPastDataIndex >= 0 ? lastPastDataIndex : data.length - 1
+    for (let i = endIndex; i >= 0; i--) {
       const currentStock = data[i][name]
       if (currentStock != null) {
         // 次のデータ（時系列的には後）と比較して在庫が増加した時点を検出
@@ -85,9 +96,9 @@ export function StockHistoryChart({
       }
     }
 
-    // 補充が一度もない場合は、最新の在庫数を基準とする
+    // 補充が一度もない場合は、過去データの最新の在庫数を基準とする
     if (baseValue === 0) {
-      for (let i = data.length - 1; i >= 0; i--) {
+      for (let i = endIndex; i >= 0; i--) {
         if (data[i][name] != null) {
           baseValue = data[i][name]
           break
@@ -97,16 +108,6 @@ export function StockHistoryChart({
 
     baseValues[name] = baseValue || 1 // 0で割ることを防ぐため、最小値を1に設定
   })
-
-  // 過去データと予測データの境界を計算
-  let lastPastDataIndex = -1
-  for (let i = 0; i < data.length; i++) {
-    if (new Date(data[i].date).toISOString().split("T")[0] <= today) {
-      lastPastDataIndex = i
-    } else {
-      break
-    }
-  }
 
   // データを処理して過去データと予測データを分け、割合に変換
   const processedData = data.map((item, index) => {
